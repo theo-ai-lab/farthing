@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Env & secrets — NEVER commit Stripe keys or the approval signing secret
+.env
+.env.*
+!.env.example
+*.key
+secrets/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.mypy_cache/
+
+# Local infra state
+pgdata/
+temporal-data/
+
+# OS
+.DS_Store
