@@ -47,13 +47,18 @@ build-backend = "uv_build"
 module-root = "src"
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 src = ["src", "tests"]
 
 [tool.ruff.lint]
 # `flt-money` is a local custom rule enforced in CI (see scripts/check_no_float_money.py);
 # ruff carries the general hygiene set.
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# UP042: (str, Enum) is a deliberate, JSON-friendly explicit mixin for the money
+# domain types — clearer than StrEnum about the intent. SIM103: an explicit
+# guard chain (if not X: return False ...) reads better than a negated boolean
+# soup for a multi-condition coherence check.
+ignore = ["UP042", "SIM103"]
 
 [tool.pyright]
 include = ["src", "tests"]

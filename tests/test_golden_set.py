@@ -22,7 +22,13 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
-from farthing.domain import AccountFacts, ActionType, Disposition, ExtractedRequest, SubscriptionStatus
+from farthing.domain import (
+    AccountFacts,
+    ActionType,
+    Disposition,
+    ExtractedRequest,
+    SubscriptionStatus,
+)
 from farthing.money import Money, pct_of
 from farthing.policy import decide
 

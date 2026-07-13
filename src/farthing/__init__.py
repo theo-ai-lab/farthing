@@ -34,6 +34,7 @@ from .money import Money
 from .policy import POLICY_VERSION, decide
 
 __all__ = [
+    "POLICY_VERSION",
     "AccountFacts",
     "ActionType",
     "ApprovalToken",
@@ -46,7 +47,6 @@ __all__ = [
     "InMemoryIdempotencyStore",
     "LedgerEntry",
     "Money",
-    "POLICY_VERSION",
     "PolicyDecision",
     "PreparedAction",
     "SubscriptionStatus",

@@ -56,6 +56,8 @@ async def _run_agent() -> None:
 async def setup_reconciliation_schedule(client: Client, task_queue: str) -> None:
     """Create (idempotently) the nightly reconciliation Schedule that fires
     ReconciliationWorkflow. Skipped if already present."""
+    import contextlib
+
     from temporalio.client import (
         Schedule,
         ScheduleActionStartWorkflow,
@@ -63,7 +65,7 @@ async def setup_reconciliation_schedule(client: Client, task_queue: str) -> None
         ScheduleSpec,
     )
 
-    try:
+    with contextlib.suppress(ScheduleAlreadyRunningError):
         await client.create_schedule(
             "farthing-reconciliation-nightly",
             Schedule(
@@ -74,8 +76,6 @@ async def setup_reconciliation_schedule(client: Client, task_queue: str) -> None
                 spec=ScheduleSpec(cron_expressions=["0 3 * * *"]),  # 03:00 daily
             ),
         )
-    except ScheduleAlreadyRunningError:
-        pass
 
 
 async def _run_execute() -> None:

@@ -27,11 +27,16 @@ class ReconciliationReport:
     ledger_refunds: int
     stripe_refunds: int
     matched: int
-    unmatched_in_stripe: tuple[str, ...] = field(default_factory=tuple)   # Stripe refund ids with no ledger match (incl. keyless)
-    unmatched_in_ledger: tuple[str, ...] = field(default_factory=tuple)   # ledger keys with no Stripe refund
-    mismatched: tuple[str, ...] = field(default_factory=tuple)            # same key, different amount or currency
-    duplicate_keys: tuple[str, ...] = field(default_factory=tuple)        # a key seen on >1 refund (either side)
-    malformed: tuple[str, ...] = field(default_factory=tuple)             # unparseable Stripe records
+    # Stripe refund ids with no ledger match (includes keyless / off-ledger refunds).
+    unmatched_in_stripe: tuple[str, ...] = field(default_factory=tuple)
+    # Ledger keys with no Stripe refund.
+    unmatched_in_ledger: tuple[str, ...] = field(default_factory=tuple)
+    # Same key, different amount or currency.
+    mismatched: tuple[str, ...] = field(default_factory=tuple)
+    # A key seen on more than one refund (either side).
+    duplicate_keys: tuple[str, ...] = field(default_factory=tuple)
+    # Unparseable Stripe records.
+    malformed: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def clean(self) -> bool:

@@ -3,10 +3,9 @@ from __future__ import annotations
 import unittest
 from decimal import Decimal
 
+from _factories import facts, refund_request
 from farthing.domain import ActionType, Disposition, ExtractedRequest, SubscriptionStatus
 from farthing.policy import POLICY_VERSION, decide
-
-from _factories import facts, refund_request
 
 
 class TestRefundPolicy(unittest.TestCase):
@@ -86,7 +85,6 @@ class TestRefundPolicy(unittest.TestCase):
 
     def test_nonfinite_usage_escalates_not_crashes(self) -> None:
         # A malformed billing field (NaN/inf) must escalate, never raise or pay.
-        from decimal import Decimal
 
         from farthing.domain import AccountFacts, SubscriptionStatus
 
@@ -105,7 +103,6 @@ class TestRefundPolicy(unittest.TestCase):
     def test_float_money_field_escalates_not_crashes(self) -> None:
         # A billing feed that delivers 5000.0 (float) instead of 5000 must
         # ESCALATE, not crash Money()'s int guard inside decide().
-        from decimal import Decimal
 
         from farthing.domain import AccountFacts, SubscriptionStatus
 

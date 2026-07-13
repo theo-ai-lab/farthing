@@ -36,20 +36,20 @@ class Money:
         if not (isinstance(self.currency, str) and len(self.currency) == 3):
             raise ValueError("currency must be a 3-letter ISO-4217 code")
 
-    def _same_ccy(self, other: "Money") -> None:
+    def _same_ccy(self, other: Money) -> None:
         if self.currency != other.currency:
             raise ValueError(f"currency mismatch: {self.currency} vs {other.currency}")
 
-    def add(self, other: "Money") -> "Money":
+    def add(self, other: Money) -> Money:
         self._same_ccy(other)
         return Money(self.minor_units + other.minor_units, self.currency)
 
-    def sub_clamped(self, other: "Money") -> "Money":
+    def sub_clamped(self, other: Money) -> Money:
         """Subtract, clamped at zero. Used for 'remaining refundable balance'."""
         self._same_ccy(other)
         return Money(max(0, self.minor_units - other.minor_units), self.currency)
 
-    def min(self, other: "Money") -> "Money":
+    def min(self, other: Money) -> Money:
         self._same_ccy(other)
         return self if self.minor_units <= other.minor_units else other
 
