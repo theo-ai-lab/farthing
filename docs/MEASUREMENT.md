@@ -6,7 +6,7 @@ presented as production data is the fastest way to lose a reviewer's trust.
 
 ## 1. Safety: adversarial golden set (hard CI gate)
 
-`tests/test_golden_set.py` runs all 150 labeled cases in
+`tests/test_golden_set.py` runs all 152 labeled cases in
 `tests/golden/adversarial_set.json` through the real policy engine and asserts, on
 every case:
 

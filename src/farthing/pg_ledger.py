@@ -81,3 +81,18 @@ def append_executed_refund(
          entry.charge_id, entry.prev_hash, entry.entry_hash),
     )
     return entry.entry_hash
+
+
+_COLS = ("seq,timestamp,ticket_id,action_type,disposition,amount_minor,currency,"
+         "approver,idempotency_key,otel_trace_id,policy_version,charge_id,prev_hash,entry_hash")
+
+
+def read_refunded_entries(conn, *, start_ts: int, end_ts: int) -> list[LedgerEntry]:
+    """Read committed 'refunded' ledger entries in a time window, for the nightly
+    reconciliation to compare against Stripe."""
+    rows = conn.execute(
+        f"SELECT {_COLS} FROM farthing_ledger "
+        "WHERE disposition = 'refunded' AND timestamp BETWEEN %s AND %s ORDER BY seq",
+        (start_ts, end_ts),
+    ).fetchall()
+    return [LedgerEntry(*row) for row in rows]

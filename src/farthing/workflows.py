@@ -18,6 +18,7 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from .activities import facts_from_dict, request_from_dict
@@ -67,6 +68,21 @@ class BillingResolutionWorkflow:
     def pending(self) -> bool:
         return self._approval is None and not self._denied
 
+    async def _reply(self, disposition: str, amount_minor: int, currency: str,
+                     raw_text: str) -> str:
+        """Draft the customer reply with a BOUNDED retry and a templated fallback.
+        This step is cosmetic and runs after the refund and ledger commit — it must
+        never be able to wedge (via Temporal's default unlimited retries) a workflow
+        whose money step already succeeded."""
+        try:
+            return await workflow.execute_activity(
+                "draft_reply", args=[disposition, amount_minor, currency, raw_text],
+                start_to_close_timeout=timedelta(seconds=60),
+                retry_policy=RetryPolicy(maximum_attempts=4),
+            )
+        except ActivityError:
+            return f"Your billing request has been processed (status: {disposition})."
+
     @workflow.query
     def prepared_action(self) -> dict | None:
         """Server-side source of truth for the approval service: the exact
@@ -96,11 +112,9 @@ class BillingResolutionWorkflow:
 
         # Non-eligible dispositions never reach an approval gate or a refund.
         if decision.disposition is not Disposition.ELIGIBLE or decision.amount_minor == 0:
-            reply = await workflow.execute_activity(
-                "draft_reply",
-                args=[decision.disposition.value, decision.amount_minor,
-                      decision.currency, req.raw_text],
-                start_to_close_timeout=timedelta(seconds=60),
+            reply = await self._reply(
+                decision.disposition.value, decision.amount_minor,
+                decision.currency, req.raw_text,
             )
             return TicketResult(
                 disposition=decision.disposition.value, amount_minor=decision.amount_minor,
@@ -123,28 +137,41 @@ class BillingResolutionWorkflow:
         await workflow.wait_condition(lambda: self._approval is not None or self._denied)
 
         if self._denied or self._approval is None:
-            reply = await workflow.execute_activity(
-                "draft_reply",
-                args=["denied_by_reviewer", 0, decision.currency, req.raw_text],
-                start_to_close_timeout=timedelta(seconds=60),
-            )
+            reply = await self._reply("denied_by_reviewer", 0, decision.currency, req.raw_text)
             return TicketResult("denied_by_reviewer", 0, decision.currency, None, reply)
 
         # Execute on the EXECUTE task queue only — the agent worker cannot run this.
+        # execute_refund is idempotent by construction (durable reservation + Stripe
+        # idempotency key + find_refund_by_key), so a generous retry count carries no
+        # double-pay risk and keeps a transient Stripe/Postgres blip from dumping the
+        # ticket into the manual reconcile path.
         refund = await workflow.execute_activity(
             "execute_refund",
             args=[self._approval.token, asdict(decision), asdict(prepared)],
             task_queue="farthing-execute",
             start_to_close_timeout=timedelta(seconds=60),
-            retry_policy=RetryPolicy(maximum_attempts=3, non_retryable_error_types=["ApplicationError"]),
+            retry_policy=RetryPolicy(maximum_attempts=6, non_retryable_error_types=["ApplicationError"]),
         )
 
-        reply = await workflow.execute_activity(
-            "draft_reply",
-            args=["refunded", decision.amount_minor, decision.currency, req.raw_text],
-            start_to_close_timeout=timedelta(seconds=60),
-        )
+        reply = await self._reply("refunded", decision.amount_minor, decision.currency, req.raw_text)
         return TicketResult(
             disposition="refunded", amount_minor=decision.amount_minor,
             currency=decision.currency, executed_refund_id=refund.get("id"), reply=reply,
+        )
+
+
+@workflow.defn
+class ReconciliationWorkflow:
+    """Fired by a nightly Temporal Schedule. Reconciles the trailing 24h+margin of
+    ledger refunds against Stripe; a non-clean report is logged as an incident by
+    the activity."""
+
+    @workflow.run
+    async def run(self, window_seconds: int = 90_000) -> dict:  # ~25h, overlaps for safety
+        end_ts = int(workflow.now().timestamp())
+        start_ts = end_ts - window_seconds
+        return await workflow.execute_activity(
+            "reconcile_window", args=[start_ts, end_ts],
+            start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=RetryPolicy(maximum_attempts=3),
         )

@@ -106,7 +106,6 @@ class TestAdversarialGoldenSet(unittest.TestCase):
                 demand = int(c["attacker_demanded_minor"])
                 # 4. attacker never extracts more than the ceiling
                 self.assertLessEqual(d.amount_minor, _ceiling(facts), f"{cid}: attack beat ceiling")
-                over = max(0, demand - d.amount_minor)
                 if demand > _ceiling(facts):
                     demanded_out_of_policy += (demand - _ceiling(facts))
                     blocked += (demand - _ceiling(facts))

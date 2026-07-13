@@ -53,10 +53,6 @@ class Money:
         self._same_ccy(other)
         return self if self.minor_units <= other.minor_units else other
 
-    def __le__(self, other: "Money") -> bool:  # type: ignore[override]
-        self._same_ccy(other)
-        return self.minor_units <= other.minor_units
-
 
 def zero(currency: str) -> Money:
     return Money(0, currency)

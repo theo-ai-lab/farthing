@@ -84,9 +84,18 @@ def _verify_csrf(session_cookie: str | None, form_token: str | None) -> None:
         raise HTTPException(status_code=403, detail="bad CSRF token")
 
 
+_temporal_client: Client | None = None
+
+
 async def _client() -> Client:
-    s = approval_settings()
-    return await Client.connect(s.temporal_address, namespace=s.temporal_namespace)
+    """Reuse a single Temporal client across requests. Connecting per request (the
+    inbox does so up to twice per approve) churns gRPC channels against the
+    frontend."""
+    global _temporal_client
+    if _temporal_client is None:
+        s = approval_settings()
+        _temporal_client = await Client.connect(s.temporal_address, namespace=s.temporal_namespace)
+    return _temporal_client
 
 
 def _render(prepared: PreparedAction, csrf: str) -> str:

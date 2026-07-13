@@ -65,12 +65,16 @@ different processes.
 - **Typed extraction + policy engine** — separates "what did the customer ask"
   (LLM, fallible) from "what are we permitted to do and for how much" (code,
   deterministic). This is the "LLM proposes, code disposes" split, made structural.
-- **Temporal durable execution** — the approval wait, the retries with a saga
-  compensation path, the nightly reconciliation Schedule, and the two-task-queue
-  credential routing are all first-class Temporal primitives, not bespoke glue.
-- **Deterministic idempotency key derived in the workflow** — a retried activity
-  re-uses the key rather than minting a fresh one, which is what makes execution
-  exactly-once across crashes and redeliveries.
+- **Temporal durable execution** — the durable approval wait, idempotent retries,
+  the nightly reconciliation Schedule, and the two-task-queue credential routing
+  are all first-class Temporal primitives, not bespoke glue. A refund cannot be
+  automatically un-executed (Stripe refunds are not reversible), so the recovery
+  path is not a saga unwind: it is idempotent retry (the reservation + Stripe
+  idempotency key make a second attempt safe) plus the nightly reconciliation,
+  which surfaces any executed-but-unsettled or off-ledger refund as an incident.
+- **Deterministic idempotency key (workflow id + step + ticket)** — a retried
+  activity re-uses the key rather than minting a fresh one, which is what makes
+  execution exactly-once across crashes and redeliveries.
 - **HMAC approval token bound to the amount** — the approved figure and the
   executed figure cannot diverge; tampering invalidates the signature.
 - **Hash-chained ledger** — tamper-evidence an auditor can verify independently

@@ -16,10 +16,23 @@ library upgrades.
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import TypedDict
 
 import stripe
 
 from .domain import AccountFacts, SubscriptionStatus
+
+
+class RefundResult(TypedDict):
+    """The fixed, cross-module shape of a refund result. Temporal-serializable and
+    honest about the fields consumers rely on."""
+
+    id: str
+    amount: int
+    status: str
+    currency: str
+    idempotency_key: str
+    api_version: str
 
 # Pin the API version alongside the library major so behavior is reproducible and
 # auditable. Record this string in the ledger with every executed refund.
@@ -56,7 +69,8 @@ class PrepareClient:
             for r in self._c.refunds.list({"charge": charge_id, "limit": 100}).auto_paging_iter():
                 prior_refunds += int(r.amount)
 
-        plan = sub["items"]["data"][0]["price"] if sub.get("items") else {}
+        items = (sub.get("items") or {}).get("data") or []
+        plan = items[0]["price"] if items else {}
         meta = dict(plan.get("metadata", {})) if plan else {}
 
         return AccountFacts(
@@ -75,6 +89,19 @@ class PrepareClient:
             charge_id=charge_id,  # the refund MUST target this exact charge
         )
 
+    def list_refunds_in_window(self, *, start_ts: int, end_ts: int) -> list[dict]:
+        """All refunds Stripe recorded in a window, for nightly reconciliation.
+        Auto-paginates; carries the Farthing key from metadata so reconcile() can
+        match (and flag keyless/off-ledger refunds)."""
+        out: list[dict] = []
+        page = self._c.refunds.list({"created": {"gte": start_ts, "lte": end_ts}, "limit": 100})
+        for r in page.auto_paging_iter():
+            out.append({
+                "id": r.id, "amount": int(r.amount), "currency": r.currency,
+                "idempotency_key": dict(getattr(r, "metadata", {})).get("farthing_idempotency_key"),
+            })
+        return out
+
 
 class ExecuteClient:
     """Refund-execute scope. The ONLY money-moving surface in the system."""
@@ -84,7 +111,7 @@ class ExecuteClient:
 
     def create_refund(
         self, *, charge_id: str, amount_minor: int, idempotency_key: str, reason: str = "requested_by_customer"
-    ) -> dict:
+    ) -> RefundResult:
         """Create a refund on the bound charge. The idempotency key is
         caller-derived and deterministic, so any retry within Stripe's window
         collapses into the original refund. The key is ALSO persisted into refund
@@ -103,7 +130,7 @@ class ExecuteClient:
                 "currency": refund.currency, "idempotency_key": idempotency_key,
                 "api_version": STRIPE_API_VERSION}
 
-    def find_refund_by_key(self, *, charge_id: str, idempotency_key: str) -> dict | None:
+    def find_refund_by_key(self, *, charge_id: str, idempotency_key: str) -> RefundResult | None:
         """Look up an already-created refund by the Farthing key stored in metadata.
         Used to resolve a retried execution idempotently (return the existing refund
         rather than create a second one) even after Stripe's idempotency window."""

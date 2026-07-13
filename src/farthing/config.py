@@ -35,6 +35,8 @@ class WorkerSettings(BaseSettings):
     temporal_address: str = "localhost:7233"
     temporal_namespace: str = "default"
     task_queue: str = "farthing-agent"
+    # Read-only access to the ledger DB for the nightly reconciliation activity.
+    reconcile_database_url: SecretStr | None = Field(default=None)
 
     # Guardrail: the execute key must NOT be visible to the worker.
     stripe_execute_key: SecretStr | None = Field(default=None)

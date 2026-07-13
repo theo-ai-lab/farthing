@@ -22,7 +22,7 @@ account, and an Anthropic API key.
 # 1. Install
 uv sync
 
-# 2. Infra: Temporal + Postgres + Langfuse
+# 2. Infra: Temporal + Postgres (+ temporal-ui)
 docker compose up -d
 
 # 3. Config

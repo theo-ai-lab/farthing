@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from .domain import ActionType, ExtractedRequest
+from .money import format_money
 
 
 class ExtractionOutput(BaseModel):
@@ -92,7 +93,8 @@ async def draft_reply(
     """Draft the customer reply from the decided disposition. The amount is passed
     in from the engine's decision — the model never chooses it."""
     agent: Agent[None, str] = Agent(model, output_type=str, system_prompt=_REPLY_SYSTEM)
-    amount_str = f"{amount_minor / 100:.2f} {currency}" if amount_minor else "n/a"
+    # Single currency-correct money-formatting path (same as the approval preview).
+    amount_str = format_money(amount_minor, currency) if amount_minor else "n/a"
     prompt = (
         f"Disposition: {disposition}\n"
         f"Approved amount: {amount_str}\n"

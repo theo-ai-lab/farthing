@@ -34,6 +34,21 @@ from .domain import (
 )
 from .execution_guard import ApprovalToken, authorize_execution
 
+# Bootstrap the execute-side schema once per worker process, not on every refund.
+_SCHEMA_READY = False
+
+
+def _ensure_schema_once(store, conn) -> None:
+    global _SCHEMA_READY
+    if _SCHEMA_READY:
+        return
+    from . import pg_ledger
+
+    store.ensure_schema()
+    pg_ledger.ensure_schema(conn)
+    conn.commit()
+    _SCHEMA_READY = True
+
 
 # ---- Agent-side activities (PREPARE scope) ---------------------------------
 
@@ -52,13 +67,20 @@ async def extract(raw_text: str) -> dict:
 
 @activity.defn
 async def fetch_facts(subscription_id: str, invoice_id: str | None, now_ts: int) -> dict:
+    import stripe
+
     from .stripe_client import PrepareClient
 
     s = worker_settings()
     client = PrepareClient(s.stripe_prepare_key.get_secret_value())
-    facts = client.fetch_facts(
-        subscription_id=subscription_id, invoice_id=invoice_id, now_ts=now_ts
-    )
+    try:
+        facts = client.fetch_facts(
+            subscription_id=subscription_id, invoice_id=invoice_id, now_ts=now_ts
+        )
+    except stripe.InvalidRequestError as e:
+        # Deterministic 4xx (bad/nonexistent id): retrying will never succeed, so
+        # fail immediately instead of burning the retry budget.
+        raise ApplicationError(f"invalid Stripe request: {e}", non_retryable=True) from e
     d = asdict(facts)
     d["usage_fraction"] = str(facts.usage_fraction)
     d["plan_max_refund_pct"] = str(facts.plan_max_refund_pct)
@@ -81,6 +103,40 @@ async def compensate(refund_id: str, reason: str) -> None:
     # A refund is not reversible via API; compensation records the failure,
     # opens an incident, and flags the ledger entry for human resolution.
     activity.logger.error("compensation for refund %s: %s", refund_id, reason)
+
+
+@activity.defn
+async def reconcile_window(start_ts: int, end_ts: int) -> dict:
+    """Nightly reconciliation: compare committed ledger refunds against Stripe for
+    the window and return the report. A non-clean report is an incident. Read-only
+    (PREPARE scope), so it runs on the agent worker. Wire it to a Temporal Schedule
+    (see worker.setup_reconciliation_schedule)."""
+    import psycopg
+
+    from . import pg_ledger
+    from .reconcile import reconcile
+    from .stripe_client import PrepareClient
+
+    s = worker_settings()
+    with psycopg.connect(s.reconcile_database_url.get_secret_value()) as conn:
+        ledger_entries = pg_ledger.read_refunded_entries(conn, start_ts=start_ts, end_ts=end_ts)
+    stripe_refunds = PrepareClient(s.stripe_prepare_key.get_secret_value()).list_refunds_in_window(
+        start_ts=start_ts, end_ts=end_ts
+    )
+    report = reconcile(ledger_entries, stripe_refunds, window_start_ts=start_ts, window_end_ts=end_ts)
+    if not report.clean:
+        activity.logger.error(
+            "RECONCILIATION INCIDENT %s..%s: unmatched_stripe=%s unmatched_ledger=%s "
+            "mismatched=%s duplicate_keys=%s malformed=%s",
+            start_ts, end_ts, report.unmatched_in_stripe, report.unmatched_in_ledger,
+            report.mismatched, report.duplicate_keys, report.malformed,
+        )
+    return {"clean": report.clean, "matched": report.matched,
+            "unmatched_in_stripe": list(report.unmatched_in_stripe),
+            "unmatched_in_ledger": list(report.unmatched_in_ledger),
+            "mismatched": list(report.mismatched),
+            "duplicate_keys": list(report.duplicate_keys),
+            "malformed": list(report.malformed)}
 
 
 # ---- Execute-side activity (EXECUTE scope — separate worker) ----------------
@@ -131,8 +187,7 @@ async def execute_refund(token_d: dict, decision_d: dict, prepared_d: dict) -> d
 
     with psycopg.connect(s.database_url.get_secret_value()) as conn:
         store = PostgresIdempotencyStore(conn)
-        store.ensure_schema()
-        pg_ledger.ensure_schema(conn)
+        _ensure_schema_once(store, conn)
         try:
             instr = authorize_execution(
                 s.approval_signing_secret.get_secret_value().encode(),

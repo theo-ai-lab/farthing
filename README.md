@@ -28,14 +28,14 @@ even against a fully prompt-injected model:
   "refund me \$500 on my \$5 plan" gets the policy-permitted amount and not a
   cent more, because \$500 is structurally impossible to emit.
 - Execution runs behind an **HMAC-signed approval token bound to the exact
-  previewed amount**, a **deterministic idempotency key** derived inside the
-  durable workflow, and a **PREPARE/EXECUTE credential split** — the agent worker
+  previewed amount and charge**, a **deterministic idempotency key** (workflow id
+  + step + ticket), and a **PREPARE/EXECUTE credential split** — the agent worker
   literally does not hold a Stripe key that can move money.
 
 ## The wow moment
 
 Try to socially-engineer an over-refund and watch the policy engine block it,
-explain why, and route it to a human. On the 150-case adversarial golden set,
+explain why, and route it to a human. On the 152-case adversarial golden set,
 every out-of-policy dollar demanded is blocked and **\$0 executes beyond policy**
 — enforced as a CI gate that fails the build on a single violation.
 
@@ -75,7 +75,7 @@ the agent worker (PREPARE key); `execute_refund` runs only on the execute worker
 | Language / tooling | Python 3.14, uv, ruff, pyright (strict), pytest |
 | Agent framework | Pydantic AI (`pydantic-ai-slim[anthropic,temporal]`) |
 | Models | Claude Sonnet 5 (extraction) → Claude Opus 4.8 (escalation) |
-| Durable execution | Temporal (`temporalio`) — retries, saga compensation, Schedules |
+| Durable execution | Temporal (`temporalio`) — idempotent retries, durable approval waits, reconciliation Schedule |
 | Payments | Stripe (test mode), deterministic idempotency keys |
 | Human-in-the-loop | Server-rendered approval inbox (FastAPI) |
 | Observability | OpenTelemetry → Langfuse; hash-chained audit ledger |

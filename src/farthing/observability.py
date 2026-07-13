@@ -26,7 +26,16 @@ def configure_tracing(service_name: str) -> None:
         return
     provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
     endpoint = os.environ.get("FARTHING_OTLP_ENDPOINT", "http://localhost:3000/api/public/otel/v1/traces")
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
+    # Langfuse's OTLP endpoint requires an Authorization header (Basic base64 of
+    # public:secret). Without it, spans are silently rejected and the
+    # trace-id-to-ledger link never materializes. Pass it through from env.
+    headers = None
+    auth = os.environ.get("FARTHING_OTLP_HEADERS")  # e.g. "Authorization=Basic <b64>"
+    if auth:
+        headers = dict(h.split("=", 1) for h in auth.split(",") if "=" in h)
+    provider.add_span_processor(
+        BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers))
+    )
     trace.set_tracer_provider(provider)
     _CONFIGURED = True
 

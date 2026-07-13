@@ -83,6 +83,23 @@ class TestReconcile(unittest.TestCase):
         self.assertFalse(report.clean)
         self.assertIn("frthg_k", report.unmatched_in_ledger)
 
+    def test_ledger_entry_outside_window_is_ignored(self) -> None:
+        # A refund at ts=9999 is outside [0, 2000]; matched Stripe side is also out
+        # of scope, so the window correctly excludes it from this run's ledger set.
+        led = _ledger_with_refund("frthg_k", 5000, ts=9999)
+        report = reconcile(list(led.entries()), [], window_start_ts=0, window_end_ts=2000)
+        self.assertEqual(report.ledger_refunds, 0)
+        self.assertTrue(report.clean)
+
+    def test_non_refunded_disposition_ignored(self) -> None:
+        led = AuditLedger()
+        led.append(timestamp=1000, ticket_id="t1", action_type="refund",
+                   disposition="escalate", amount_minor=0, currency="USD",
+                   policy_version="2026.07.1", idempotency_key=None)
+        report = reconcile(list(led.entries()), [], window_start_ts=0, window_end_ts=2000)
+        self.assertEqual(report.ledger_refunds, 0)
+        self.assertTrue(report.clean)
+
 
 if __name__ == "__main__":
     unittest.main()
