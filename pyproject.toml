@@ -11,18 +11,21 @@ keywords = ["ai-automation", "agents", "temporal", "stripe", "human-in-the-loop"
 # The money-critical core (farthing.money/domain/policy/ledger/idempotency/
 # execution_guard) imports NOTHING here — it is pure standard library and is
 # tested with zero dependencies. These are the edge adapters only.
+# Money-path adapters carry upper caps so a breaking major cannot be pulled in
+# silently. The committed uv.lock (run `uv lock`) is the primary reproducibility
+# guarantee; these caps are the belt-and-suspenders for the fast-moving deps.
 dependencies = [
-  "pydantic-ai-slim[anthropic,temporal]>=2.9.0",
-  "anthropic>=0.116.0",
-  "temporalio>=1.30.0",
+  "pydantic-ai-slim[anthropic,temporal]>=2.9.0,<3",
+  "anthropic>=0.116.0,<1",
+  "temporalio>=1.30.0,<2",
   "stripe>=15.3.0,<16",
-  "fastapi>=0.121.0",
-  "uvicorn[standard]>=0.38.0",
-  "psycopg[binary]>=3.2.0",
-  "pydantic>=2.12.0",
-  "pydantic-settings>=2.7.0",
-  "opentelemetry-sdk>=1.43.0",
-  "opentelemetry-exporter-otlp-proto-http>=1.43.0",
+  "fastapi>=0.121.0,<1",
+  "uvicorn[standard]>=0.38.0,<1",
+  "psycopg[binary]>=3.2.0,<4",
+  "pydantic>=2.12.0,<3",
+  "pydantic-settings>=2.7.0,<3",
+  "opentelemetry-sdk>=1.43.0,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.43.0,<2",
 ]
 
 [project.optional-dependencies]

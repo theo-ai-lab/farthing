@@ -56,6 +56,10 @@ class ApprovalSettings(BaseSettings):
     execute_task_queue: str = "farthing-execute"
     # Header the upstream auth proxy sets with the authenticated reviewer identity.
     reviewer_email_header: str = "x-reviewer-email"
+    # Shared secret the auth proxy sends (X-Proxy-Auth) so a client that reaches
+    # the app directly and forges the identity header still cannot authenticate.
+    # REQUIRED — the identity header alone is spoofable without it.
+    proxy_shared_secret: SecretStr = Field(..., description="Shared secret proving the request came via the auth proxy")
 
 
 def assert_credential_split(worker: WorkerSettings) -> None:

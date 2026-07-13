@@ -59,10 +59,19 @@ async def _security_headers(request: Request, call_next):
 
 
 def require_reviewer(request: Request) -> str:
-    """Authenticated reviewer identity from the upstream auth proxy. Fails CLOSED:
-    if no proxy-asserted identity is present, the request is rejected — an
-    unauthenticated caller can never approve a refund."""
+    """Authenticated reviewer identity from the upstream auth proxy. Fails CLOSED.
+
+    The identity header is only trusted after the request proves it came THROUGH
+    the proxy by presenting the shared X-Proxy-Auth secret. Without this check a
+    client that reaches the app directly could forge the identity header and
+    approve refunds — the header alone is spoofable. The proxy MUST also strip any
+    inbound X-Reviewer-Email so a caller cannot smuggle one; this secret is the
+    defense-in-depth that holds even if that stripping is misconfigured."""
     s = approval_settings()
+    presented = request.headers.get("x-proxy-auth", "")
+    expected = s.proxy_shared_secret.get_secret_value()
+    if not (presented and hmac.compare_digest(presented, expected)):
+        raise HTTPException(status_code=401, detail="request did not come via the auth proxy")
     email = request.headers.get(s.reviewer_email_header)
     if not email or "@" not in email:
         raise HTTPException(status_code=401, detail="no authenticated reviewer identity")
