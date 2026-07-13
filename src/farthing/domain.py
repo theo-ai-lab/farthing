@@ -13,6 +13,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
+from typing import TypedDict
+
+
+class RefundResult(TypedDict):
+    """The fixed, cross-module shape of a refund result. Temporal-serializable and
+    honest about the fields consumers rely on. Pure (no Stripe import) so the
+    execute activity can name it as its return type without pulling in the SDK."""
+
+    id: str
+    amount: int
+    status: str
+    currency: str
+    idempotency_key: str
+    api_version: str
 
 
 class ActionType(str, Enum):
@@ -80,13 +94,13 @@ class AccountFacts:
         infinity) are exactly the shape a bad billing-system field can take, so
         they are treated as incoherent, not compared."""
         for d in (self.usage_fraction, self.plan_max_refund_pct):
-            if not isinstance(d, Decimal) or not d.is_finite():
+            if type(d) is not Decimal or not d.is_finite():
                 return False
         # Integer money fields must actually be ints (a float/Decimal from a bad
         # billing feed must ESCALATE, not crash Money()'s int guard downstream).
         for n in (self.amount_paid_minor, self.prior_refunds_minor,
                   self.purchase_ts, self.now_ts, self.plan_refund_window_days):
-            if not isinstance(n, int) or isinstance(n, bool):
+            if type(n) is not int:  # reject float/Decimal and bool (bool is an int subtype)
                 return False
         if self.amount_paid_minor < 0 or self.prior_refunds_minor < 0:
             return False
@@ -100,7 +114,7 @@ class AccountFacts:
             return False
         if self.plan_refund_window_days < 0:
             return False
-        if not (isinstance(self.currency, str) and self.currency.isalpha() and len(self.currency) == 3):
+        if type(self.currency) is not str or not self.currency.isalpha() or len(self.currency) != 3:
             return False
         return True
 

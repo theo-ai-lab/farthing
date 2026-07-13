@@ -12,6 +12,8 @@ module binds it to a database.
 
 from __future__ import annotations
 
+from .db import DBConn
+
 DDL = """
 CREATE TABLE IF NOT EXISTS farthing_idempotency (
   key         TEXT PRIMARY KEY,
@@ -26,7 +28,7 @@ class PostgresIdempotencyStore:
     that persists the execution/ledger record, so a crash between reserve and
     record cannot leave a reserved-but-unexecuted key without a trace."""
 
-    def __init__(self, conn) -> None:  # psycopg.Connection
+    def __init__(self, conn: DBConn) -> None:
         self._conn = conn
 
     def ensure_schema(self) -> None:
@@ -42,4 +44,4 @@ class PostgresIdempotencyStore:
             (key,),
         )
         # Caller commits (ideally in the same txn as the execution record).
-        return result.rowcount == 1
+        return bool(result.rowcount == 1)

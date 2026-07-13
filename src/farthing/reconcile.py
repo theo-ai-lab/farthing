@@ -16,6 +16,7 @@ currency must both agree for a match.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any, cast
 
 from .ledger import LedgerEntry
 
@@ -48,7 +49,7 @@ class ReconciliationReport:
 
 def reconcile(
     ledger_entries: list[LedgerEntry],
-    stripe_refunds: list[dict],
+    stripe_refunds: list[Any],  # loosely-shaped, possibly-malformed Stripe records; parsed defensively
     *,
     window_start_ts: int,
     window_end_ts: int,
@@ -75,17 +76,24 @@ def reconcile(
     stripe_keys_seen: set[str] = set()
     stripe_count = 0
 
-    for r in stripe_refunds:
+    for raw in stripe_refunds:
+        # A Stripe record must be a mapping to be parseable; a non-dict is
+        # quarantined as malformed, never dropped. isinstance narrows only to a
+        # bare dict[Unknown, Unknown], so cast pins the value type we then read.
+        rec: dict[str, Any] | None = cast("dict[str, Any]", raw) if isinstance(raw, dict) else None
+        if rec is None:
+            malformed.append("<non-dict>")
+            continue
         # Defensive parse: a bad record is quarantined, not fatal.
         try:
-            rid = str(r["id"])
-            amount = int(r["amount"])
-            currency = str(r["currency"]).upper()
+            rid = str(rec["id"])
+            amount = int(rec["amount"])
+            currency = str(rec["currency"]).upper()
         except (KeyError, ValueError, TypeError):
-            malformed.append(str(r.get("id", "<no-id>")) if isinstance(r, dict) else "<non-dict>")
+            malformed.append(str(rec.get("id", "<no-id>")))
             continue
         stripe_count += 1
-        key = r.get("idempotency_key") if isinstance(r, dict) else None
+        key = rec.get("idempotency_key")
 
         if not key:
             # A refund with no Farthing key is exactly the off-ledger money this

@@ -26,6 +26,10 @@ prek install    # git hooks: ruff + no-float-money + invariant suite on every co
 # 2. Infra: Temporal + Postgres (+ temporal-ui)
 docker compose up -d
 
+# 2b. Register the custom search attribute the approval inbox filters on to list
+#     the workflows parked at the gate. One-time per namespace.
+temporal operator search-attribute create --name farthing_state --type Keyword
+
 # 3. Config
 cp .env.example .env    # fill in the two Stripe restricted keys + Anthropic key
 #   IMPORTANT: the PREPARE and EXECUTE keys are different keys in different

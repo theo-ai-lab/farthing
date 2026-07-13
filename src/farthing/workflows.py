@@ -15,15 +15,20 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import timedelta
+from typing import Any
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy
+from temporalio.common import RetryPolicy, SearchAttributeKey
 from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from .activities import facts_from_dict, request_from_dict
     from .domain import Disposition, PreparedAction
     from .policy import decide
+
+# Custom search attribute the approval inbox filters on to list parked workflows.
+# Register it once per Temporal namespace (see docs/RUNBOOK.md).
+FARTHING_STATE = SearchAttributeKey.for_keyword("farthing_state")
 
 
 @dataclass
@@ -37,7 +42,7 @@ class TicketInput:
 
 @dataclass
 class Approval:
-    token: dict  # a signed ApprovalToken as a dict, issued by the approval service
+    token: dict[str, Any]  # a signed ApprovalToken as a dict, issued by the approval service
 
 
 @dataclass
@@ -54,7 +59,7 @@ class BillingResolutionWorkflow:
     def __init__(self) -> None:
         self._approval: Approval | None = None
         self._denied = False
-        self._prepared: dict | None = None
+        self._prepared: dict[str, Any] | None = None
 
     @workflow.signal
     async def approve(self, approval: Approval) -> None:
@@ -84,7 +89,7 @@ class BillingResolutionWorkflow:
             return f"Your billing request has been processed (status: {disposition})."
 
     @workflow.query
-    def prepared_action(self) -> dict | None:
+    def prepared_action(self) -> dict[str, Any] | None:
         """Server-side source of truth for the approval service: the exact
         previewed action (including the signed charge). The approval inbox loads
         the amount and charge from HERE, never from the client, so a request body
@@ -133,7 +138,9 @@ class BillingResolutionWorkflow:
 
         # Publish the pending prepared action + idempotency key for the approval
         # service to render and sign, then park until a human decides.
-        workflow.upsert_search_attributes({"farthing_state": ["awaiting_approval"]})
+        workflow.upsert_search_attributes(  # pyright: ignore[reportUnknownMemberType]  # temporalio stub gap
+            [FARTHING_STATE.value_set("awaiting_approval")]
+        )
         await workflow.wait_condition(lambda: self._approval is not None or self._denied)
 
         if self._denied or self._approval is None:
@@ -182,7 +189,7 @@ class ReconciliationWorkflow:
     the activity."""
 
     @workflow.run
-    async def run(self, window_seconds: int = 90_000) -> dict:  # ~25h, overlaps for safety
+    async def run(self, window_seconds: int = 90_000) -> dict[str, Any]:  # ~25h, overlaps for safety
         end_ts = int(workflow.now().timestamp())
         start_ts = end_ts - window_seconds
         return await workflow.execute_activity(

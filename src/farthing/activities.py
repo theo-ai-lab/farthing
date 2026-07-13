@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -30,30 +31,35 @@ from .domain import (
     ExtractedRequest,
     PolicyDecision,
     PreparedAction,
+    RefundResult,
     SubscriptionStatus,
 )
 from .execution_guard import ApprovalToken, authorize_execution
 
+if TYPE_CHECKING:
+    from .db import DBConn
+    from .idempotency_store import PostgresIdempotencyStore
+
 # Bootstrap the execute-side schema once per worker process, not on every refund.
-_SCHEMA_READY = False
+_schema_ready = False
 
 
-def _ensure_schema_once(store, conn) -> None:
-    global _SCHEMA_READY
-    if _SCHEMA_READY:
+def _ensure_schema_once(store: PostgresIdempotencyStore, conn: DBConn) -> None:
+    global _schema_ready
+    if _schema_ready:
         return
     from . import pg_ledger
 
     store.ensure_schema()
     pg_ledger.ensure_schema(conn)
     conn.commit()
-    _SCHEMA_READY = True
+    _schema_ready = True
 
 
 # ---- Agent-side activities (PREPARE scope) ---------------------------------
 
 @activity.defn
-async def extract(raw_text: str) -> dict:
+async def extract(raw_text: str) -> dict[str, Any]:
     from .agent import extract_request
 
     s = worker_settings()
@@ -66,7 +72,7 @@ async def extract(raw_text: str) -> dict:
 
 
 @activity.defn
-async def fetch_facts(subscription_id: str, invoice_id: str | None, now_ts: int) -> dict:
+async def fetch_facts(subscription_id: str, invoice_id: str | None, now_ts: int) -> dict[str, Any]:
     import stripe
 
     from .stripe_client import PrepareClient
@@ -106,7 +112,7 @@ async def compensate(refund_id: str, reason: str) -> None:
 
 
 @activity.defn
-async def reconcile_window(start_ts: int, end_ts: int) -> dict:
+async def reconcile_window(start_ts: int, end_ts: int) -> dict[str, Any]:
     """Nightly reconciliation: compare committed ledger refunds against Stripe for
     the window and return the report. A non-clean report is an incident. Read-only
     (PREPARE scope), so it runs on the agent worker. Wire it to a Temporal Schedule
@@ -118,6 +124,13 @@ async def reconcile_window(start_ts: int, end_ts: int) -> dict:
     from .stripe_client import PrepareClient
 
     s = worker_settings()
+    if s.reconcile_database_url is None:
+        # Reconciliation is the safety net; it must fail loud and non-retryable
+        # rather than crash nightly with an AttributeError on an unset optional.
+        raise ApplicationError(
+            "FARTHING_RECONCILE_DATABASE_URL is not configured — reconciliation cannot run",
+            non_retryable=True,
+        )
     with psycopg.connect(s.reconcile_database_url.get_secret_value()) as conn:
         ledger_entries = pg_ledger.read_refunded_entries(conn, start_ts=start_ts, end_ts=end_ts)
     stripe_refunds = PrepareClient(s.stripe_prepare_key.get_secret_value()).list_refunds_in_window(
@@ -142,7 +155,9 @@ async def reconcile_window(start_ts: int, end_ts: int) -> dict:
 # ---- Execute-side activity (EXECUTE scope — separate worker) ----------------
 
 @activity.defn
-async def execute_refund(token_d: dict, decision_d: dict, prepared_d: dict) -> dict:
+async def execute_refund(
+    token_d: dict[str, Any], decision_d: dict[str, Any], prepared_d: dict[str, Any]
+) -> RefundResult:
     """The only activity that moves money.
 
     Ordering is the exactly-once boundary: the durable key reservation is
@@ -200,7 +215,11 @@ async def execute_refund(token_d: dict, decision_d: dict, prepared_d: dict) -> d
                 # Already reserved by a prior attempt. Resolve idempotently:
                 # return the existing refund on the SIGNED charge, or re-drive
                 # Stripe with the same key (Stripe dedups). token.charge_id is the
-                # signed target — never the unsigned activity argument.
+                # signed target — never the unsigned activity argument. The guard
+                # only reaches "replay" after the unbound_charge check passed, so
+                # the charge is bound; assert it to make that guarantee typed.
+                if token.charge_id is None:
+                    raise ApplicationError("replayed refund token has no bound charge", non_retryable=True) from e
                 existing = client.find_refund_by_key(
                     charge_id=token.charge_id, idempotency_key=token.idempotency_key
                 )
@@ -227,6 +246,10 @@ async def execute_refund(token_d: dict, decision_d: dict, prepared_d: dict) -> d
         )
         conn.commit()
 
+    # authorize_execution refuses a refund with no bound charge (unbound_charge),
+    # so instr.charge_id is guaranteed set here; assert it to keep that typed.
+    if instr.charge_id is None:
+        raise ApplicationError("authorized refund has no bound charge", non_retryable=True)
     return client.create_refund(
         charge_id=instr.charge_id,  # the signed, bound charge — no unsigned fallback
         amount_minor=instr.amount_minor,
@@ -257,7 +280,7 @@ async def record_dead_letter(
         conn.commit()
 
 
-def facts_from_dict(d: dict) -> AccountFacts:
+def facts_from_dict(d: dict[str, Any]) -> AccountFacts:
     return AccountFacts(
         subscription_id=d["subscription_id"],
         invoice_id=d.get("invoice_id"),
@@ -275,7 +298,7 @@ def facts_from_dict(d: dict) -> AccountFacts:
     )
 
 
-def request_from_dict(d: dict) -> ExtractedRequest:
+def request_from_dict(d: dict[str, Any]) -> ExtractedRequest:
     return ExtractedRequest(
         action_type=ActionType(d["action_type"]),
         customer_ref=d["customer_ref"],

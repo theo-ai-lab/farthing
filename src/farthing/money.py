@@ -29,11 +29,11 @@ class Money:
     currency: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.minor_units, int) or isinstance(self.minor_units, bool):
-            raise TypeError("minor_units must be an int (never a float)")
+        if type(self.minor_units) is not int:  # reject float and bool (bool is an int subtype)
+            raise TypeError("minor_units must be an int (never a float or bool)")
         if self.minor_units < 0:
             raise ValueError("Money is non-negative; use direction at the call site")
-        if not (isinstance(self.currency, str) and len(self.currency) == 3):
+        if type(self.currency) is not str or len(self.currency) != 3:
             raise ValueError("currency must be a 3-letter ISO-4217 code")
 
     def _same_ccy(self, other: Money) -> None:
@@ -83,7 +83,7 @@ def minor_unit_exponent(currency: str) -> int:
 def format_money(minor_units: int, currency: str) -> str:
     """Human string with the currency's real minor-unit precision, computed in
     Decimal (never a float). ``5000 JPY`` -> ``5000 JPY``; ``1234 BHD`` -> ``1.234 BHD``."""
-    if isinstance(minor_units, bool) or not isinstance(minor_units, int):
+    if type(minor_units) is not int:  # reject float and bool (bool is an int subtype)
         raise TypeError("minor_units must be an int")
     exp = minor_unit_exponent(currency)
     if exp == 0:

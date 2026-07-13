@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .db import DBConn
+
 
 @dataclass(frozen=True, slots=True)
 class DeadLetterEntry:
@@ -56,11 +58,11 @@ CREATE TABLE IF NOT EXISTS farthing_dead_letter (
 """
 
 
-def ensure_schema(conn) -> None:
+def ensure_schema(conn: DBConn) -> None:
     conn.execute(DDL)
 
 
-def record_dead_letter(conn, entry: DeadLetterEntry) -> None:
+def record_dead_letter(conn: DBConn, entry: DeadLetterEntry) -> None:
     """Persist a dead-letter entry. Caller commits."""
     conn.execute(
         "INSERT INTO farthing_dead_letter "
@@ -71,7 +73,7 @@ def record_dead_letter(conn, entry: DeadLetterEntry) -> None:
     )
 
 
-def read_dead_letters(conn, *, unresolved_only: bool = False) -> list[DeadLetterEntry]:
+def read_dead_letters(conn: DBConn, *, unresolved_only: bool = False) -> list[DeadLetterEntry]:
     """Read dead-letter entries for the ops/reconciliation surface."""
     where = "WHERE resolved = FALSE " if unresolved_only else ""
     rows = conn.execute(

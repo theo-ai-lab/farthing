@@ -16,23 +16,11 @@ library upgrades.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TypedDict
+from typing import Any
 
 import stripe
 
-from .domain import AccountFacts, SubscriptionStatus
-
-
-class RefundResult(TypedDict):
-    """The fixed, cross-module shape of a refund result. Temporal-serializable and
-    honest about the fields consumers rely on."""
-
-    id: str
-    amount: int
-    status: str
-    currency: str
-    idempotency_key: str
-    api_version: str
+from .domain import AccountFacts, RefundResult, SubscriptionStatus
 
 # Pin the API version alongside the library major so behavior is reproducible and
 # auditable. Record this string in the ledger with every executed refund.
@@ -55,23 +43,32 @@ class PrepareClient:
         self._c = stripe.StripeClient(api_key, stripe_version=STRIPE_API_VERSION)
 
     def fetch_facts(self, *, subscription_id: str, invoice_id: str | None, now_ts: int) -> AccountFacts:
-        sub = self._c.subscriptions.retrieve(subscription_id)
-        invoice = self._c.invoices.retrieve(invoice_id) if invoice_id else None
+        # Stripe SDK objects are dynamically shaped and only partially typed by the
+        # stubs; hold them as Any at this boundary and narrow every value into the
+        # strongly-typed AccountFacts below. The `.v1.` accessors are the current,
+        # non-deprecated service surface in the pinned Stripe major.
+        sub: Any = self._c.v1.subscriptions.retrieve(subscription_id)
+        invoice: Any = self._c.v1.invoices.retrieve(invoice_id) if invoice_id else None
 
         amount_paid = int(invoice.amount_paid) if invoice else 0
-        currency = (invoice.currency if invoice else sub.currency or "usd").upper()
+        currency = str(invoice.currency if invoice else sub.currency or "usd").upper()
 
         charge_id = getattr(invoice, "charge", None) if invoice is not None else None
         prior_refunds = 0
         if charge_id:
             # Auto-paginate: a charge with >100 prior refunds must not be
             # undercounted, or the cumulative ceiling would be inflated.
-            for r in self._c.refunds.list({"charge": charge_id, "limit": 100}).auto_paging_iter():
+            for r in self._c.v1.refunds.list({"charge": charge_id, "limit": 100}).auto_paging_iter():
                 prior_refunds += int(r.amount)
 
-        items = (sub.get("items") or {}).get("data") or []
-        plan = items[0]["price"] if items else {}
-        meta = dict(plan.get("metadata", {})) if plan else {}
+        # Walk the dynamically-shaped subscription payload defensively; each hop
+        # stays Any so a missing field yields None (guarded) instead of forcing a
+        # typed empty-dict literal into the expression.
+        sub_items: Any = sub.get("items")
+        data: Any = sub_items.get("data") if sub_items else None
+        plan: Any = data[0]["price"] if data else None
+        meta_raw: Any = plan.get("metadata") if plan else None
+        meta: dict[str, Any] = dict(meta_raw) if meta_raw else {}
 
         return AccountFacts(
             subscription_id=subscription_id,
@@ -89,12 +86,12 @@ class PrepareClient:
             charge_id=charge_id,  # the refund MUST target this exact charge
         )
 
-    def list_refunds_in_window(self, *, start_ts: int, end_ts: int) -> list[dict]:
+    def list_refunds_in_window(self, *, start_ts: int, end_ts: int) -> list[dict[str, Any]]:
         """All refunds Stripe recorded in a window, for nightly reconciliation.
         Auto-paginates; carries the Farthing key from metadata so reconcile() can
         match (and flag keyless/off-ledger refunds)."""
-        out: list[dict] = []
-        page = self._c.refunds.list({"created": {"gte": start_ts, "lte": end_ts}, "limit": 100})
+        out: list[dict[str, Any]] = []
+        page: Any = self._c.v1.refunds.list({"created": {"gte": start_ts, "lte": end_ts}, "limit": 100})
         for r in page.auto_paging_iter():
             out.append({
                 "id": r.id, "amount": int(r.amount), "currency": r.currency,
@@ -119,25 +116,23 @@ class ExecuteClient:
         refund by key instead of creating a duplicate — see ``find_refund_by_key``.
         Stripe always refunds in the charge's own currency; the guard validates
         that the decided currency equals the charge/invoice currency upstream."""
-        refund = self._c.refunds.create(
-            {
-                "charge": charge_id, "amount": amount_minor, "reason": reason,
-                "metadata": {"farthing_idempotency_key": idempotency_key},
-            },
-            {"idempotency_key": idempotency_key},
-        )
-        return {"id": refund.id, "amount": int(refund.amount), "status": refund.status,
-                "currency": refund.currency, "idempotency_key": idempotency_key,
+        params: Any = {
+            "charge": charge_id, "amount": amount_minor, "reason": reason,
+            "metadata": {"farthing_idempotency_key": idempotency_key},
+        }
+        refund: Any = self._c.v1.refunds.create(params, {"idempotency_key": idempotency_key})
+        return {"id": str(refund.id), "amount": int(refund.amount), "status": str(refund.status),
+                "currency": str(refund.currency), "idempotency_key": idempotency_key,
                 "api_version": STRIPE_API_VERSION}
 
     def find_refund_by_key(self, *, charge_id: str, idempotency_key: str) -> RefundResult | None:
         """Look up an already-created refund by the Farthing key stored in metadata.
         Used to resolve a retried execution idempotently (return the existing refund
         rather than create a second one) even after Stripe's idempotency window."""
-        refunds = self._c.refunds.list({"charge": charge_id, "limit": 100})
+        refunds: Any = self._c.v1.refunds.list({"charge": charge_id, "limit": 100})
         for r in refunds.auto_paging_iter():
             if dict(getattr(r, "metadata", {})).get("farthing_idempotency_key") == idempotency_key:
-                return {"id": r.id, "amount": int(r.amount), "status": r.status,
-                        "currency": r.currency, "idempotency_key": idempotency_key,
+                return {"id": str(r.id), "amount": int(r.amount), "status": str(r.status),
+                        "currency": str(r.currency), "idempotency_key": idempotency_key,
                         "api_version": STRIPE_API_VERSION}
         return None

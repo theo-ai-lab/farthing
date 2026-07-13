@@ -30,10 +30,12 @@ import hashlib
 import hmac
 import secrets
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from html import escape
+from typing import Any
 
-from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from temporalio.client import Client
 
@@ -48,7 +50,9 @@ app = FastAPI(title="Farthing Approval Inbox")
 
 
 @app.middleware("http")
-async def _security_headers(request: Request, call_next):
+async def _security_headers(  # pyright: ignore[reportUnusedFunction]  # registered by the decorator
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     resp = await call_next(request)
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none'; style-src 'unsafe-inline'"
@@ -145,7 +149,8 @@ async def inbox(request: Request, reviewer: str = Depends(require_reviewer),
         "button{padding:.5rem 1rem;border-radius:8px;border:0;cursor:pointer;margin-right:.5rem}"
         ".ok{background:#0a7d32;color:#fff}.no{background:#eee}"
     )
-    items = "".join(_render(p, csrf) for p in [])  # bound to the live pending set in production
+    pending = await _load_pending()
+    items = "".join(_render(p, csrf) for p in pending)
     body = items or "<p>No actions awaiting approval.</p>"
     html = (f"<!doctype html><style>{style}</style>"
             f"<h1>Farthing — Approval Inbox</h1><p>Signed in as {escape(reviewer)}</p>{body}")
@@ -200,6 +205,37 @@ def _workflow_id(ticket_id: str) -> str:
     return f"farthing-ticket-{ticket_id}"
 
 
+def _prepared_from_query(d: dict[str, Any]) -> PreparedAction:
+    """Build a PreparedAction from a workflow's server-side ``prepared_action``
+    query payload (never from a request body)."""
+    return PreparedAction(
+        ticket_id=d["ticket_id"], action_type=ActionType(d["action_type"]),
+        subscription_id=d["subscription_id"], invoice_id=d.get("invoice_id"),
+        amount_minor=d["amount_minor"], currency=d["currency"],
+        policy_version=d["policy_version"], charge_id=d.get("charge_id"),
+        reason_codes=tuple(d.get("reason_codes", ())),
+    )
+
+
+async def _load_pending() -> list[PreparedAction]:
+    """List the actions parked at the approval gate by querying Temporal visibility
+    for workflows in the awaiting-approval state, then reading each one's
+    server-side prepared action. Requires the ``farthing_state`` custom search
+    attribute (see docs/RUNBOOK.md). Degrades to an empty list if a workflow
+    finished between the visibility scan and the query."""
+    client = await _client()
+    out: list[PreparedAction] = []
+    async for wf in client.list_workflows("farthing_state = 'awaiting_approval'"):
+        try:
+            handle = client.get_workflow_handle(wf.id)
+            d = await handle.query("prepared_action")
+        except Exception:  # a workflow that just finished mid-scan is no longer queryable; skip it
+            continue
+        if d:
+            out.append(_prepared_from_query(d))
+    return out
+
+
 async def _load_prepared(ticket_id: str) -> PreparedAction:
     """Load the prepared action from WORKFLOW state (server-side truth) via a
     query — never from the request body. A refund with no bound charge is rejected
@@ -211,13 +247,7 @@ async def _load_prepared(ticket_id: str) -> PreparedAction:
         raise HTTPException(status_code=409, detail="ticket is not awaiting approval")
     if d.get("action_type") == ActionType.REFUND.value and not d.get("charge_id"):
         raise HTTPException(status_code=400, detail="refund has no bound charge")
-    return PreparedAction(
-        ticket_id=d["ticket_id"], action_type=ActionType(d["action_type"]),
-        subscription_id=d["subscription_id"], invoice_id=d.get("invoice_id"),
-        amount_minor=d["amount_minor"], currency=d["currency"],
-        policy_version=d["policy_version"], charge_id=d.get("charge_id"),
-        reason_codes=tuple(d.get("reason_codes", ())),
-    )
+    return _prepared_from_query(d)
 
 
 def main() -> None:

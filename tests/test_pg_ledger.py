@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from typing import Any
 
 from farthing import pg_ledger
 from farthing.ledger import verify_chain
@@ -30,7 +31,7 @@ class FakeConn:
     def __init__(self) -> None:
         self.rows: list[tuple] = []  # tuples in _COLS order (seq..entry_hash)
 
-    def execute(self, sql: str, params=None):
+    def execute(self, sql: str, params: Any = None):
         s = sql.strip()
         if s.startswith("CREATE TABLE"):
             return _Result([])

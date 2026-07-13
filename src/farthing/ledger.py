@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import asdict, dataclass, field, replace
+from typing import Any
 
 from .idempotency import canonical_json
 
@@ -38,7 +39,7 @@ class LedgerEntry:
     prev_hash: str
     entry_hash: str = field(default="")
 
-    def _hashable(self) -> dict:
+    def _hashable(self) -> dict[str, Any]:
         d = asdict(self)
         d.pop("entry_hash", None)
         return d

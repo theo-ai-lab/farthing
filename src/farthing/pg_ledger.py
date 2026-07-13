@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from .db import DBConn
 from .ledger import GENESIS_HASH, LedgerEntry
 
 DDL = """
@@ -34,12 +35,12 @@ CREATE TABLE IF NOT EXISTS farthing_ledger (
 """
 
 
-def ensure_schema(conn) -> None:
+def ensure_schema(conn: DBConn) -> None:
     conn.execute(DDL)
 
 
 def append_executed_refund(
-    conn,
+    conn: DBConn,
     *,
     timestamp: int,
     ticket_id: str,
@@ -90,7 +91,7 @@ _COLS = ("seq,timestamp,ticket_id,action_type,disposition,amount_minor,currency,
          "approver,idempotency_key,otel_trace_id,policy_version,charge_id,api_version,prev_hash,entry_hash")
 
 
-def read_refunded_entries(conn, *, start_ts: int, end_ts: int) -> list[LedgerEntry]:
+def read_refunded_entries(conn: DBConn, *, start_ts: int, end_ts: int) -> list[LedgerEntry]:
     """Read committed 'refunded' ledger entries in a time window, for the nightly
     reconciliation to compare against Stripe."""
     rows = conn.execute(

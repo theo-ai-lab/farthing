@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 
 from farthing import dead_letter
 
@@ -18,7 +19,7 @@ class FakeConn:
     def __init__(self) -> None:
         self.rows: list[tuple] = []
 
-    def execute(self, sql, params=None):
+    def execute(self, sql: str, params: Any = None):
         s = sql.strip()
         if s.startswith("CREATE TABLE"):
             return _Result()
