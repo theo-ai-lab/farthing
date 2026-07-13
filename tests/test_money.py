@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from decimal import Decimal
 
-from farthing.money import Money, format_money, minor_unit_exponent, pct_of, prorate, zero
+from farthing.money import Money, format_money, minor_unit_exponent, pct_of, zero
 
 
 class TestMoney(unittest.TestCase):
@@ -36,24 +36,6 @@ class TestMoney(unittest.TestCase):
     def test_pct_bounds(self) -> None:
         with self.assertRaises(ValueError):
             pct_of(Money(100, "USD"), Decimal("1.5"))
-
-    def test_prorate_cannot_exceed_amount(self) -> None:
-        # remaining > total is clamped, so proration never exceeds the amount.
-        self.assertEqual(
-            prorate(Money(1000, "USD"), Decimal("30"), Decimal("14")),
-            Money(1000, "USD"),
-        )
-
-    def test_prorate_partial(self) -> None:
-        # 1000 * 7/14 = 500
-        self.assertEqual(
-            prorate(Money(1000, "USD"), Decimal("7"), Decimal("14")),
-            Money(500, "USD"),
-        )
-
-    def test_prorate_requires_positive_total(self) -> None:
-        with self.assertRaises(ValueError):
-            prorate(Money(1000, "USD"), Decimal("1"), Decimal("0"))
 
     def test_currency_aware_formatting(self) -> None:
         # 5000 minor units means very different things by currency.

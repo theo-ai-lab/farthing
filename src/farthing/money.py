@@ -110,20 +110,3 @@ def pct_of(amount: Money, fraction: Decimal) -> Money:
         Decimal(1), rounding=ROUND_HALF_UP
     )
     return Money(int(raw), amount.currency)
-
-
-def prorate(amount: Money, remaining: Decimal, total: Decimal) -> Money:
-    """Proration: ``amount * remaining / total``, HALF_UP to a minor unit.
-
-    Both ``remaining`` and ``total`` are Decimals (e.g. days). ``total`` must be
-    positive; ``remaining`` is clamped to ``[0, total]`` so proration can never
-    exceed the original amount.
-    """
-    for name, val in (("remaining", remaining), ("total", total)):
-        if isinstance(val, float):
-            raise TypeError(f"{name} must be Decimal, not float")
-    if total <= 0:
-        raise ValueError("total must be positive")
-    clamped = max(Decimal(0), min(remaining, total))
-    fraction = clamped / total
-    return pct_of(amount, fraction)

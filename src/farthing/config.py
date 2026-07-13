@@ -52,6 +52,8 @@ class ApprovalSettings(BaseSettings):
     temporal_address: str = "localhost:7233"
     temporal_namespace: str = "default"
     execute_task_queue: str = "farthing-execute"
+    # Header the upstream auth proxy sets with the authenticated reviewer identity.
+    reviewer_email_header: str = "x-reviewer-email"
 
 
 def assert_credential_split(worker: WorkerSettings) -> None:
