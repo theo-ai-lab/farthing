@@ -21,6 +21,7 @@ account, and an Anthropic API key.
 ```bash
 # 1. Install
 uv sync
+prek install    # git hooks: ruff + no-float-money + invariant suite on every commit
 
 # 2. Infra: Temporal + Postgres (+ temporal-ui)
 docker compose up -d

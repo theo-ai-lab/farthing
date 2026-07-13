@@ -33,6 +33,21 @@ class TestLedger(unittest.TestCase):
     def test_verify_intact(self) -> None:
         self.assertTrue(verify_chain(_sample().entries()))
 
+    def test_api_version_recorded_and_hashed(self) -> None:
+        # The pinned Stripe API version must be part of the audit entry (and its
+        # hash) so a hash-chained payload stays byte-stable across library upgrades.
+        led = AuditLedger()
+        led.append(
+            timestamp=1000, ticket_id="t1", action_type="refund", disposition="refunded",
+            amount_minor=5000, currency="USD", policy_version="2026.07.1",
+            api_version="2026-06-30.acacia",
+        )
+        e = led.entries()[0]
+        self.assertEqual(e.api_version, "2026-06-30.acacia")
+        # Tampering the recorded API version breaks the chain.
+        forged = replace(e, api_version="2020-01-01.legacy")
+        self.assertFalse(verify_chain([forged]))
+
     def test_charge_id_recorded_and_hashed(self) -> None:
         led = _sample()
         self.assertEqual(led.entries()[0].charge_id, "ch_1")

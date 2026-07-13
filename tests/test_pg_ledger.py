@@ -35,7 +35,8 @@ class FakeConn:
         if s.startswith("CREATE TABLE"):
             return _Result([])
         if s.startswith("SELECT seq, entry_hash"):  # tail lock (ORDER BY seq DESC LIMIT 1)
-            return _Result([(self.rows[-1][0], self.rows[-1][13])] if self.rows else [])
+            # row layout matches _COLS: seq=0 ... entry_hash is the LAST column.
+            return _Result([(self.rows[-1][0], self.rows[-1][-1])] if self.rows else [])
         if s.startswith("INSERT INTO farthing_ledger"):
             self.rows.append(tuple(params))
             return _Result([], rowcount=1)

@@ -88,7 +88,7 @@ async def _run_execute() -> None:
     async with Worker(
         client,
         task_queue=s.execute_task_queue,
-        activities=[activities.execute_refund],
+        activities=[activities.execute_refund, activities.record_dead_letter],
     ):
         await asyncio.Event().wait()
 

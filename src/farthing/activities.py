@@ -182,6 +182,7 @@ async def execute_refund(token_d: dict, decision_d: dict, prepared_d: dict) -> d
     from .execution_guard import ExecutionRefused
     from .idempotency_store import PostgresIdempotencyStore
     from .observability import current_trace_id
+    from .stripe_client import STRIPE_API_VERSION
 
     client = ExecuteClient(s.stripe_execute_key.get_secret_value())
 
@@ -222,7 +223,7 @@ async def execute_refund(token_d: dict, decision_d: dict, prepared_d: dict) -> d
             amount_minor=instr.amount_minor, currency=instr.currency,
             charge_id=instr.charge_id, approver=instr.approver,
             idempotency_key=instr.idempotency_key, otel_trace_id=current_trace_id(),
-            policy_version=decision.policy_version,
+            policy_version=decision.policy_version, api_version=STRIPE_API_VERSION,
         )
         conn.commit()
 
@@ -231,6 +232,29 @@ async def execute_refund(token_d: dict, decision_d: dict, prepared_d: dict) -> d
         amount_minor=instr.amount_minor,
         idempotency_key=instr.idempotency_key,
     )
+
+
+@activity.defn
+async def record_dead_letter(
+    ticket_id: str, reason_code: str, amount_minor: int, currency: str, detail: str
+) -> None:
+    """Persist a terminally-failed refund execution to the dead-letter queue for
+    human resolution. Runs on the execute worker (has the ledger DB)."""
+    import time
+
+    import psycopg
+
+    from . import dead_letter
+
+    s = approval_settings()
+    entry = dead_letter.build_dead_letter(
+        timestamp=int(time.time()), ticket_id=ticket_id, reason_code=reason_code,
+        amount_minor=amount_minor, currency=currency, detail=detail,
+    )
+    with psycopg.connect(s.database_url.get_secret_value()) as conn:
+        dead_letter.ensure_schema(conn)
+        dead_letter.record_dead_letter(conn, entry)
+        conn.commit()
 
 
 def facts_from_dict(d: dict) -> AccountFacts:

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS farthing_ledger (
   otel_trace_id   TEXT,
   policy_version  TEXT NOT NULL,
   charge_id       TEXT,
+  api_version     TEXT,
   prev_hash       TEXT NOT NULL,
   entry_hash      TEXT NOT NULL
 );
@@ -49,6 +50,7 @@ def append_executed_refund(
     idempotency_key: str,
     otel_trace_id: str | None,
     policy_version: str,
+    api_version: str | None = None,
 ) -> str:
     """Append a 'refunded' entry chained to the current head, within the caller's
     transaction. Serializes appends by locking the tail row (SELECT ... FOR
@@ -66,25 +68,26 @@ def append_executed_refund(
         seq=seq, timestamp=timestamp, ticket_id=ticket_id, action_type="refund",
         disposition="refunded", amount_minor=amount_minor, currency=currency,
         approver=approver, idempotency_key=idempotency_key, otel_trace_id=otel_trace_id,
-        policy_version=policy_version, charge_id=charge_id, prev_hash=prev_hash,
+        policy_version=policy_version, charge_id=charge_id, api_version=api_version,
+        prev_hash=prev_hash,
     )
     entry = replace(draft, entry_hash=draft.compute_hash())
 
     conn.execute(
         "INSERT INTO farthing_ledger (seq, timestamp, ticket_id, action_type, "
         "disposition, amount_minor, currency, approver, idempotency_key, "
-        "otel_trace_id, policy_version, charge_id, prev_hash, entry_hash) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "otel_trace_id, policy_version, charge_id, api_version, prev_hash, entry_hash) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (entry.seq, entry.timestamp, entry.ticket_id, entry.action_type,
          entry.disposition, entry.amount_minor, entry.currency, entry.approver,
          entry.idempotency_key, entry.otel_trace_id, entry.policy_version,
-         entry.charge_id, entry.prev_hash, entry.entry_hash),
+         entry.charge_id, entry.api_version, entry.prev_hash, entry.entry_hash),
     )
     return entry.entry_hash
 
 
 _COLS = ("seq,timestamp,ticket_id,action_type,disposition,amount_minor,currency,"
-         "approver,idempotency_key,otel_trace_id,policy_version,charge_id,prev_hash,entry_hash")
+         "approver,idempotency_key,otel_trace_id,policy_version,charge_id,api_version,prev_hash,entry_hash")
 
 
 def read_refunded_entries(conn, *, start_ts: int, end_ts: int) -> list[LedgerEntry]:

@@ -87,7 +87,8 @@ different processes.
 | LLM mis-extracts action | Human sees full preview before approval; deny routes back |
 | Injection tries to set an amount | Type has no amount field; engine ignores text |
 | Execute activity times out / retries | Same idempotency key → Stripe dedups → exactly-once |
-| Approval refused mid-execute | `non_retryable` ApplicationError; no retry-into-success |
+| Approval refused mid-execute | `non_retryable` ApplicationError; the ticket is dead-lettered (see below), not retried into success |
+| Execution fails terminally (guard refusal or exhausted retries) | Recorded to the dead-letter queue (`dead_letter`) for human resolution; the workflow completes as `dead_lettered` instead of crashing. Money did not move. |
 | Money moved off-ledger | Nightly reconciliation flags unmatched Stripe refund as incident |
 | Ledger tampered | `verify_chain` fails from the tampered entry onward |
 | Worker/deploy during approval wait | Durable workflow resumes; wait survives |

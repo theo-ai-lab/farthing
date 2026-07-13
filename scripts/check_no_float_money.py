@@ -18,6 +18,7 @@ CORE = [
     "policy.py",
     "ledger.py",
     "pg_ledger.py",
+    "dead_letter.py",
     "idempotency.py",
     "execution_guard.py",
     "reconcile.py",

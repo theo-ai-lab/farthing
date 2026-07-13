@@ -1,0 +1,28 @@
+# Git hooks run by prek (pre-commit compatible). Install with `prek install`.
+# The money core is gated locally on every commit — no float can slip in, and the
+# invariant suite must be green before code lands.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.21
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: no-float-money
+        name: no floats in the money core
+        entry: python3 scripts/check_no_float_money.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: invariant-suite
+        name: money invariant + adversarial golden set
+        entry: python3 -m unittest discover -s tests -p "test_*.py"
+        language: system
+        pass_filenames: false
+        always_run: true
+        env:
+          PYTHONPATH: src:tests

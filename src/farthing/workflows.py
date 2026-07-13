@@ -145,13 +145,28 @@ class BillingResolutionWorkflow:
         # idempotency key + find_refund_by_key), so a generous retry count carries no
         # double-pay risk and keeps a transient Stripe/Postgres blip from dumping the
         # ticket into the manual reconcile path.
-        refund = await workflow.execute_activity(
-            "execute_refund",
-            args=[self._approval.token, asdict(decision), asdict(prepared)],
-            task_queue="farthing-execute",
-            start_to_close_timeout=timedelta(seconds=60),
-            retry_policy=RetryPolicy(maximum_attempts=6, non_retryable_error_types=["ApplicationError"]),
-        )
+        try:
+            refund = await workflow.execute_activity(
+                "execute_refund",
+                args=[self._approval.token, asdict(decision), asdict(prepared)],
+                task_queue="farthing-execute",
+                start_to_close_timeout=timedelta(seconds=60),
+                retry_policy=RetryPolicy(maximum_attempts=6, non_retryable_error_types=["ApplicationError"]),
+            )
+        except ActivityError as e:
+            # Terminal execution failure (guard refusal or exhausted retries). Money
+            # did not move; dead-letter the ticket for human resolution instead of
+            # crashing the workflow. The nightly reconciliation also surfaces it.
+            await workflow.execute_activity(
+                "record_dead_letter",
+                args=[ticket.ticket_id, "execution_failed", decision.amount_minor,
+                      decision.currency, str(e)],
+                task_queue="farthing-execute",
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=5),
+            )
+            reply = await self._reply("execution_failed", 0, decision.currency, req.raw_text)
+            return TicketResult("dead_lettered", 0, decision.currency, None, reply)
 
         reply = await self._reply("refunded", decision.amount_minor, decision.currency, req.raw_text)
         return TicketResult(
