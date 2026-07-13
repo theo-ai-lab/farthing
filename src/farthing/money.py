@@ -62,6 +62,37 @@ def zero(currency: str) -> Money:
     return Money(0, currency)
 
 
+# ISO-4217 minor-unit exponents that are not 2. Refunds and the human-facing
+# approval preview MUST format by the real exponent, or a reviewer approving a
+# "50.00 JPY" refund is actually looking at ¥5000 shown as ¥50.00.
+_ZERO_DECIMAL = frozenset({
+    "JPY", "KRW", "VND", "CLP", "PYG", "XAF", "XOF", "XPF", "BIF", "DJF",
+    "GNF", "ISK", "KMF", "RWF", "UGX", "VUV", "XCD",
+})
+_THREE_DECIMAL = frozenset({"BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"})
+
+
+def minor_unit_exponent(currency: str) -> int:
+    c = currency.upper()
+    if c in _ZERO_DECIMAL:
+        return 0
+    if c in _THREE_DECIMAL:
+        return 3
+    return 2
+
+
+def format_money(minor_units: int, currency: str) -> str:
+    """Human string with the currency's real minor-unit precision, computed in
+    Decimal (never a float). ``5000 JPY`` -> ``5000 JPY``; ``1234 BHD`` -> ``1.234 BHD``."""
+    if isinstance(minor_units, bool) or not isinstance(minor_units, int):
+        raise TypeError("minor_units must be an int")
+    exp = minor_unit_exponent(currency)
+    if exp == 0:
+        return f"{minor_units} {currency.upper()}"
+    scaled = (Decimal(minor_units) / (Decimal(10) ** exp)).quantize(Decimal(1).scaleb(-exp))
+    return f"{scaled} {currency.upper()}"
+
+
 def pct_of(amount: Money, fraction: Decimal) -> Money:
     """A percentage of an amount, rounded HALF_UP to the nearest minor unit.
 

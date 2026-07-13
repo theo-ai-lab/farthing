@@ -22,7 +22,6 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from .activities import facts_from_dict, request_from_dict
     from .domain import Disposition, PreparedAction
-    from .idempotency import derive_idempotency_key
     from .policy import decide
 
 
@@ -54,6 +53,7 @@ class BillingResolutionWorkflow:
     def __init__(self) -> None:
         self._approval: Approval | None = None
         self._denied = False
+        self._prepared: dict | None = None
 
     @workflow.signal
     async def approve(self, approval: Approval) -> None:
@@ -66,6 +66,14 @@ class BillingResolutionWorkflow:
     @workflow.query
     def pending(self) -> bool:
         return self._approval is None and not self._denied
+
+    @workflow.query
+    def prepared_action(self) -> dict | None:
+        """Server-side source of truth for the approval service: the exact
+        previewed action (including the signed charge). The approval inbox loads
+        the amount and charge from HERE, never from the client, so a request body
+        cannot inflate the amount or redirect the charge."""
+        return self._prepared
 
     @workflow.run
     async def run(self, ticket: TicketInput) -> TicketResult:
@@ -103,16 +111,11 @@ class BillingResolutionWorkflow:
             ticket_id=ticket.ticket_id, action_type=req.action_type,
             subscription_id=ticket.subscription_id, invoice_id=ticket.invoice_id,
             amount_minor=decision.amount_minor, currency=decision.currency,
-            policy_version=decision.policy_version, charge_id=ticket.charge_id,
+            policy_version=decision.policy_version,
+            charge_id=facts.charge_id,  # refund the charge whose facts set the amount
             reason_codes=decision.reason_codes,
         )
-        # Key on stable logical identity (ticket + action) only — NOT the amount —
-        # so any second execution of the same ticket is refused regardless of the
-        # amount approved. The signed token binds the amount.
-        idem_key = derive_idempotency_key(
-            workflow.info().workflow_id, "execute_refund",
-            {"ticket": ticket.ticket_id},
-        )
+        self._prepared = asdict(prepared)  # publish for the approval service to read + sign
 
         # Publish the pending prepared action + idempotency key for the approval
         # service to render and sign, then park until a human decides.

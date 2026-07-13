@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from decimal import Decimal
 
-from farthing.money import Money, pct_of, prorate, zero
+from farthing.money import Money, format_money, minor_unit_exponent, pct_of, prorate, zero
 
 
 class TestMoney(unittest.TestCase):
@@ -54,6 +54,18 @@ class TestMoney(unittest.TestCase):
     def test_prorate_requires_positive_total(self) -> None:
         with self.assertRaises(ValueError):
             prorate(Money(1000, "USD"), Decimal("1"), Decimal("0"))
+
+    def test_currency_aware_formatting(self) -> None:
+        # 5000 minor units means very different things by currency.
+        self.assertEqual(format_money(5000, "USD"), "50.00 USD")
+        self.assertEqual(format_money(5000, "JPY"), "5000 JPY")   # zero-decimal
+        self.assertEqual(format_money(5000, "BHD"), "5.000 BHD")  # three-decimal
+        self.assertEqual(format_money(0, "USD"), "0.00 USD")
+
+    def test_minor_unit_exponent(self) -> None:
+        self.assertEqual(minor_unit_exponent("usd"), 2)
+        self.assertEqual(minor_unit_exponent("JPY"), 0)
+        self.assertEqual(minor_unit_exponent("KWD"), 3)
 
 
 if __name__ == "__main__":

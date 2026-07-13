@@ -116,6 +116,7 @@ async def execute_refund(
         amount_minor=prepared_d["amount_minor"],
         currency=prepared_d["currency"],
         policy_version=prepared_d["policy_version"],
+        charge_id=prepared_d.get("charge_id"),  # keep the signed charge across the boundary
         reason_codes=tuple(prepared_d.get("reason_codes", ())),
     )
 
@@ -123,18 +124,17 @@ async def execute_refund(
 
     import psycopg
 
+    from . import pg_ledger
     from .execution_guard import ExecutionRefused
     from .idempotency_store import PostgresIdempotencyStore
+    from .observability import current_trace_id
 
     client = ExecuteClient(s.stripe_execute_key.get_secret_value())
-
-    # The refund targets the charge BOUND by the approval, not the raw ticket
-    # input, so an unsigned charge_id cannot redirect the money.
-    bound_charge = prepared.charge_id or charge_id
 
     with psycopg.connect(s.database_url.get_secret_value()) as conn:
         store = PostgresIdempotencyStore(conn)
         store.ensure_schema()
+        pg_ledger.ensure_schema(conn)
         try:
             instr = authorize_execution(
                 s.approval_signing_secret.get_secret_value().encode(),
@@ -143,27 +143,35 @@ async def execute_refund(
             )
         except ExecutionRefused as e:
             if e.code == "replay":
-                # This key was already reserved (a prior attempt authorized it).
-                # Resolve idempotently: return the existing refund if Stripe has
-                # one; otherwise re-drive Stripe with the SAME key (Stripe dedups).
+                # Already reserved by a prior attempt. Resolve idempotently:
+                # return the existing refund on the SIGNED charge, or re-drive
+                # Stripe with the same key (Stripe dedups). token.charge_id is the
+                # signed target — never the unsigned activity argument.
                 existing = client.find_refund_by_key(
-                    charge_id=bound_charge, idempotency_key=token.idempotency_key
+                    charge_id=token.charge_id, idempotency_key=token.idempotency_key
                 )
                 if existing is not None:
                     return existing
                 return client.create_refund(
-                    charge_id=bound_charge, amount_minor=token.amount_minor,
+                    charge_id=token.charge_id, amount_minor=token.amount_minor,
                     idempotency_key=token.idempotency_key,
                 )
-            # Any other refusal is terminal and must never be retried into success.
             raise ApplicationError(f"execution refused: {e.code}", non_retryable=True) from e
 
-        # Commit the reservation BEFORE touching Stripe, and do NOT roll it back on
-        # a Stripe failure — a retry must find the key reserved, not free.
+        # Reservation + hash-chained ledger entry are written and committed in ONE
+        # transaction BEFORE Stripe, and never rolled back on a Stripe failure, so
+        # a crash cannot leave money moved without an audit row (or vice versa).
+        pg_ledger.append_executed_refund(
+            conn, timestamp=int(time.time()), ticket_id=instr.ticket_id,
+            amount_minor=instr.amount_minor, currency=instr.currency,
+            charge_id=instr.charge_id, approver=instr.approver,
+            idempotency_key=instr.idempotency_key, otel_trace_id=current_trace_id(),
+            policy_version=decision.policy_version,
+        )
         conn.commit()
 
     return client.create_refund(
-        charge_id=bound_charge,
+        charge_id=instr.charge_id,  # the signed, bound charge — no unsigned fallback
         amount_minor=instr.amount_minor,
         idempotency_key=instr.idempotency_key,
     )
@@ -183,6 +191,7 @@ def facts_from_dict(d: dict) -> AccountFacts:
         plan_refund_window_days=d["plan_refund_window_days"],
         plan_allow_proration=d["plan_allow_proration"],
         plan_max_refund_pct=Decimal(d["plan_max_refund_pct"]),
+        charge_id=d.get("charge_id"),
     )
 
 

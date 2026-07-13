@@ -9,9 +9,10 @@ from farthing.ledger import GENESIS_HASH, AuditLedger, verify_chain
 def _sample() -> AuditLedger:
     led = AuditLedger()
     led.append(
-        timestamp=1000, ticket_id="t1", action_type="refund", disposition="eligible",
+        timestamp=1000, ticket_id="t1", action_type="refund", disposition="refunded",
         amount_minor=5000, currency="USD", policy_version="2026.07.1",
         approver="alice", idempotency_key="frthg_a", otel_trace_id="trace1",
+        charge_id="ch_1",
     )
     led.append(
         timestamp=1001, ticket_id="t2", action_type="cancellation", disposition="eligible",
@@ -31,6 +32,14 @@ class TestLedger(unittest.TestCase):
 
     def test_verify_intact(self) -> None:
         self.assertTrue(verify_chain(_sample().entries()))
+
+    def test_charge_id_recorded_and_hashed(self) -> None:
+        led = _sample()
+        self.assertEqual(led.entries()[0].charge_id, "ch_1")
+        # Tampering the charge_id after the fact breaks the hash.
+        entries = list(led.entries())
+        entries[0] = replace(entries[0], charge_id="ch_evil")
+        self.assertFalse(verify_chain(entries))
 
     def test_tamper_amount_breaks_chain(self) -> None:
         entries = list(_sample().entries())

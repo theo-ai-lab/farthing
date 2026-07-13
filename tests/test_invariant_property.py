@@ -120,7 +120,7 @@ class TestInvariantProperties(unittest.TestCase):
             prepared = PreparedAction(
                 ticket_id=f"t{i}", action_type=ActionType.REFUND, subscription_id="sub",
                 invoice_id="in", amount_minor=d.amount_minor, currency=d.currency,
-                policy_version=d.policy_version,
+                policy_version=d.policy_version, charge_id=f"ch{i}",
             )
             key = derive_idempotency_key(f"wf{i}", "execute_refund",
                                          {"amount": d.amount_minor})

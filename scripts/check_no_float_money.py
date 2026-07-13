@@ -17,6 +17,7 @@ CORE = [
     "domain.py",
     "policy.py",
     "ledger.py",
+    "pg_ledger.py",
     "idempotency.py",
     "execution_guard.py",
     "reconcile.py",

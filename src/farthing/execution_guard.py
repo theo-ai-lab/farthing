@@ -183,6 +183,10 @@ def authorize_execution(
         raise ExecutionRefused("action_mismatch", "token action != prepared action")
     if token.charge_id != prepared.charge_id:
         raise ExecutionRefused("charge_mismatch", "token charge != prepared charge")
+    # A refund with no signed charge cannot be authorized: the executor would
+    # otherwise fall back to an unsigned charge. The charge must be bound.
+    if prepared.action_type is ActionType.REFUND and not token.charge_id:
+        raise ExecutionRefused("unbound_charge", "refund has no signed target charge")
 
     if token.issued_ts > now_ts:
         raise ExecutionRefused("future_token", "token issued in the future")

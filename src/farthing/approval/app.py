@@ -20,10 +20,13 @@ from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from temporalio.client import Client
 
+from fastapi import HTTPException
+
 from ..config import approval_settings
 from ..domain import ActionType, PreparedAction
 from ..execution_guard import issue_approval_token
 from ..idempotency import derive_idempotency_key
+from ..money import format_money
 
 app = FastAPI(title="Farthing Approval Inbox")
 
@@ -41,7 +44,8 @@ def _pending_query() -> list[dict]:
 
 
 def _render(prepared: PreparedAction) -> str:
-    amt = f"{prepared.amount_minor / 100:.2f} {prepared.currency}"
+    # Currency-correct display: ¥5000 must never render as "50.00".
+    amt = format_money(prepared.amount_minor, prepared.currency)
     reasons = ", ".join(escape(r) for r in prepared.reason_codes)
     return f"""
     <div class="card">
@@ -123,13 +127,23 @@ def _workflow_id(ticket_id: str) -> str:
 
 
 async def _load_prepared(ticket_id: str) -> PreparedAction:
-    """Load the prepared action from workflow state (server-side truth). Stubbed
-    to a zero-amount action so a misconfigured deploy fails safe rather than
-    refunding an attacker-supplied amount."""
+    """Load the prepared action from WORKFLOW state (server-side truth) via a
+    query — never from the request body. This is what the token is signed over, so
+    a client cannot inflate the amount or redirect the charge. A refund with no
+    bound charge is rejected rather than executed against an unsigned target."""
+    client = await _client()
+    handle = client.get_workflow_handle(_workflow_id(ticket_id))
+    d = await handle.query("prepared_action")
+    if not d:
+        raise HTTPException(status_code=409, detail="ticket is not awaiting approval")
+    if d.get("action_type") == ActionType.REFUND.value and not d.get("charge_id"):
+        raise HTTPException(status_code=400, detail="refund has no bound charge")
     return PreparedAction(
-        ticket_id=ticket_id, action_type=ActionType.REFUND, subscription_id="",
-        invoice_id=None, amount_minor=0, currency="USD", policy_version="unknown",
-        charge_id=None,
+        ticket_id=d["ticket_id"], action_type=ActionType(d["action_type"]),
+        subscription_id=d["subscription_id"], invoice_id=d.get("invoice_id"),
+        amount_minor=d["amount_minor"], currency=d["currency"],
+        policy_version=d["policy_version"], charge_id=d.get("charge_id"),
+        reason_codes=tuple(d.get("reason_codes", ())),
     )
 
 

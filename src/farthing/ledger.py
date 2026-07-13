@@ -33,6 +33,7 @@ class LedgerEntry:
     idempotency_key: str | None
     otel_trace_id: str | None
     policy_version: str
+    charge_id: str | None
     prev_hash: str
     entry_hash: str = field(default="")
 
@@ -69,6 +70,7 @@ class AuditLedger:
         approver: str | None = None,
         idempotency_key: str | None = None,
         otel_trace_id: str | None = None,
+        charge_id: str | None = None,
     ) -> LedgerEntry:
         seq = len(self._entries)
         draft = LedgerEntry(
@@ -83,6 +85,7 @@ class AuditLedger:
             idempotency_key=idempotency_key,
             otel_trace_id=otel_trace_id,
             policy_version=policy_version,
+            charge_id=charge_id,
             prev_hash=self.head_hash,
         )
         entry = replace(draft, entry_hash=draft.compute_hash())

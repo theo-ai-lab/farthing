@@ -69,6 +69,10 @@ class AccountFacts:
     plan_refund_window_days: int
     plan_allow_proration: bool
     plan_max_refund_pct: Decimal
+    # The exact charge these facts describe. The refund MUST target this charge —
+    # the one whose prior-refund history and amount set the ceiling — not a charge
+    # supplied elsewhere. Carried through to the signed approval token.
+    charge_id: str | None = None
 
     def facts_are_coherent(self) -> bool:
         """Cheap internal consistency check. Incoherent facts must ESCALATE, never

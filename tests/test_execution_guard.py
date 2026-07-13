@@ -21,7 +21,7 @@ def _eligible(amount: int = 5000) -> tuple[PolicyDecision, PreparedAction]:
     prepared = PreparedAction(
         ticket_id="t1", action_type=ActionType.REFUND, subscription_id="sub",
         invoice_id="in", amount_minor=amount, currency="USD",
-        policy_version=POLICY_VERSION,
+        policy_version=POLICY_VERSION, charge_id="ch_test",
     )
     return decision, prepared
 
@@ -164,6 +164,18 @@ class TestExecutionGuard(unittest.TestCase):
             store=InMemoryIdempotencyStore(), now_ts=NOW,
         )
         self.assertEqual(instr.charge_id, "ch_bound")
+
+    def test_refund_without_bound_charge_refused(self) -> None:
+        # A refund whose signed charge is None must fail closed, never fall back
+        # to an unsigned charge.
+        decision, prepared = _eligible()
+        prepared = replace(prepared, charge_id=None)
+        with self.assertRaises(ExecutionRefused) as ctx:
+            authorize_execution(
+                SECRET, token=_token(prepared), decision=decision, prepared=prepared,
+                store=InMemoryIdempotencyStore(), now_ts=NOW,
+            )
+        self.assertEqual(ctx.exception.code, "unbound_charge")
 
     def test_wrong_secret_rejected(self) -> None:
         decision, prepared = _eligible()

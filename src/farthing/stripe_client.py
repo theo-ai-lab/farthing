@@ -48,10 +48,13 @@ class PrepareClient:
         amount_paid = int(invoice.amount_paid) if invoice else 0
         currency = (invoice.currency if invoice else sub.currency or "usd").upper()
 
+        charge_id = getattr(invoice, "charge", None) if invoice is not None else None
         prior_refunds = 0
-        if invoice is not None and getattr(invoice, "charge", None):
-            refunds = self._c.refunds.list({"charge": invoice.charge, "limit": 100})
-            prior_refunds = sum(int(r.amount) for r in refunds.data)
+        if charge_id:
+            # Auto-paginate: a charge with >100 prior refunds must not be
+            # undercounted, or the cumulative ceiling would be inflated.
+            for r in self._c.refunds.list({"charge": charge_id, "limit": 100}).auto_paging_iter():
+                prior_refunds += int(r.amount)
 
         plan = sub["items"]["data"][0]["price"] if sub.get("items") else {}
         meta = dict(plan.get("metadata", {})) if plan else {}
@@ -69,6 +72,7 @@ class PrepareClient:
             plan_refund_window_days=int(meta.get("refund_window_days", "14")),
             plan_allow_proration=meta.get("allow_proration", "true") == "true",
             plan_max_refund_pct=Decimal(meta.get("max_refund_pct", "1.0")),
+            charge_id=charge_id,  # the refund MUST target this exact charge
         )
 
 
@@ -104,7 +108,7 @@ class ExecuteClient:
         Used to resolve a retried execution idempotently (return the existing refund
         rather than create a second one) even after Stripe's idempotency window."""
         refunds = self._c.refunds.list({"charge": charge_id, "limit": 100})
-        for r in refunds.data:
+        for r in refunds.auto_paging_iter():
             if dict(getattr(r, "metadata", {})).get("farthing_idempotency_key") == idempotency_key:
                 return {"id": r.id, "amount": int(r.amount), "status": r.status,
                         "currency": r.currency, "idempotency_key": idempotency_key,
