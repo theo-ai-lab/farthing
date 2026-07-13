@@ -78,6 +78,12 @@ class AccountFacts:
         for d in (self.usage_fraction, self.plan_max_refund_pct):
             if not isinstance(d, Decimal) or not d.is_finite():
                 return False
+        # Integer money fields must actually be ints (a float/Decimal from a bad
+        # billing feed must ESCALATE, not crash Money()'s int guard downstream).
+        for n in (self.amount_paid_minor, self.prior_refunds_minor,
+                  self.purchase_ts, self.now_ts, self.plan_refund_window_days):
+            if not isinstance(n, int) or isinstance(n, bool):
+                return False
         if self.amount_paid_minor < 0 or self.prior_refunds_minor < 0:
             return False
         if self.prior_refunds_minor > self.amount_paid_minor:
@@ -127,4 +133,5 @@ class PreparedAction:
     amount_minor: int
     currency: str
     policy_version: str
+    charge_id: str | None = None  # the exact Stripe charge the refund targets
     reason_codes: tuple[str, ...] = field(default_factory=tuple)

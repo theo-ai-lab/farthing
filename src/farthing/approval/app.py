@@ -83,11 +83,14 @@ async def approve(ticket_id: str) -> RedirectResponse:
     In production, the prepared action is loaded from workflow state (a query),
     not from the request body, so a client cannot inflate the amount. The token is
     signed over that server-side amount."""
+    from dataclasses import asdict
+
     s = approval_settings()
     prepared = await _load_prepared(ticket_id)  # server-side source of truth
+    # Key on ticket identity only (matches the workflow's derivation) so both
+    # sides produce the same key regardless of amount.
     idem = derive_idempotency_key(
-        _workflow_id(ticket_id), "execute_refund",
-        {"amount": prepared.amount_minor, "currency": prepared.currency, "ticket": ticket_id},
+        _workflow_id(ticket_id), "execute_refund", {"ticket": ticket_id},
     )
     token = issue_approval_token(
         s.approval_signing_secret.get_secret_value().encode(),
@@ -98,14 +101,10 @@ async def approve(ticket_id: str) -> RedirectResponse:
     handle = client.get_workflow_handle(_workflow_id(ticket_id))
     from ..workflows import Approval
 
-    await handle.signal(
-        "approve", Approval(token={
-            "ticket_id": token.ticket_id, "amount_minor": token.amount_minor,
-            "currency": token.currency, "idempotency_key": token.idempotency_key,
-            "approver": token.approver, "issued_ts": token.issued_ts,
-            "signature": token.signature,
-        }),
-    )
+    # Serialize the FULL token (all fields, including action_type and charge_id) —
+    # a hand-picked subset drops fields ApprovalToken(**d) needs and would crash
+    # the executor before authorization even runs.
+    await handle.signal("approve", Approval(token=asdict(token)))
     return RedirectResponse("/inbox", status_code=303)
 
 
@@ -130,6 +129,7 @@ async def _load_prepared(ticket_id: str) -> PreparedAction:
     return PreparedAction(
         ticket_id=ticket_id, action_type=ActionType.REFUND, subscription_id="",
         invoice_id=None, amount_minor=0, currency="USD", policy_version="unknown",
+        charge_id=None,
     )
 
 

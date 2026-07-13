@@ -29,6 +29,7 @@ from typing import Protocol
 from .domain import ActionType, Disposition, PolicyDecision, PreparedAction
 
 DEFAULT_MAX_TOKEN_AGE_SECONDS = 900  # 15 minutes
+MAX_ALLOWED_TOKEN_AGE_SECONDS = 86_400  # hard ceiling; a caller cannot exceed this
 
 
 class ExecutionRefused(Exception):
@@ -53,16 +54,21 @@ class IdempotencyStore(Protocol):
 class InMemoryIdempotencyStore:
     """Reference/test implementation. Process-local and not durable — real
     deployments MUST use a transactional store so a worker restart cannot re-open
-    the replay window."""
+    the replay window. Thread-safe so even the reference store honors the
+    protocol's 'True exactly once per key, even under concurrency' contract."""
 
     def __init__(self) -> None:
+        import threading
+
         self._used: set[str] = set()
+        self._lock = threading.Lock()
 
     def reserve(self, key: str) -> bool:
-        if key in self._used:
-            return False
-        self._used.add(key)
-        return True
+        with self._lock:
+            if key in self._used:
+                return False
+            self._used.add(key)
+            return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,18 +77,27 @@ class ApprovalToken:
     action_type: str
     amount_minor: int
     currency: str
+    charge_id: str | None
     idempotency_key: str
     approver: str
     issued_ts: int
     signature: str
 
 
+def _length_prefixed(*parts: str) -> str:
+    """Unambiguous framing: ``len:value`` per field. A field cannot forge a
+    boundary even if it contains the delimiter, so a signature valid for one
+    (ticket, approver, charge) tuple cannot verify for a different one."""
+    return "|".join(f"{len(p)}:{p}" for p in parts)
+
+
 def _sign(secret: bytes, *, ticket_id: str, action_type: str, amount_minor: int,
-          currency: str, idempotency_key: str, approver: str, issued_ts: int) -> str:
-    material = "\x1f".join([
+          currency: str, charge_id: str | None, idempotency_key: str,
+          approver: str, issued_ts: int) -> str:
+    material = _length_prefixed(
         ticket_id, action_type, str(amount_minor), currency,
-        idempotency_key, approver, str(issued_ts),
-    ])
+        charge_id or "", idempotency_key, approver, str(issued_ts),
+    )
     return hmac.new(secret, material.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
@@ -101,25 +116,31 @@ def issue_approval_token(
     sig = _sign(
         secret, ticket_id=prepared.ticket_id, action_type=action,
         amount_minor=prepared.amount_minor, currency=prepared.currency,
-        idempotency_key=idempotency_key, approver=approver, issued_ts=issued_ts,
+        charge_id=prepared.charge_id, idempotency_key=idempotency_key,
+        approver=approver, issued_ts=issued_ts,
     )
     return ApprovalToken(
         ticket_id=prepared.ticket_id, action_type=action,
         amount_minor=prepared.amount_minor, currency=prepared.currency,
-        idempotency_key=idempotency_key, approver=approver,
-        issued_ts=issued_ts, signature=sig,
+        charge_id=prepared.charge_id, idempotency_key=idempotency_key,
+        approver=approver, issued_ts=issued_ts, signature=sig,
     )
 
 
 @dataclass(frozen=True, slots=True)
 class ExecuteInstruction:
-    """The only object the Stripe execute-activity acts on. It cannot be
-    constructed except by passing the guard below."""
+    """The object the Stripe execute-activity acts on.
+
+    This is a plain dataclass, so construction alone is not a security boundary —
+    the enforced gate is the HMAC secret checked in ``authorize_execution``. The
+    executor MUST treat ``authorize_execution`` as the only producer of an
+    ExecuteInstruction and the only path to a refund; do not hand-build one."""
 
     ticket_id: str
     action_type: str
     amount_minor: int
     currency: str
+    charge_id: str | None
     idempotency_key: str
     approver: str
 
@@ -144,8 +165,8 @@ def authorize_execution(
     expected_sig = _sign(
         secret, ticket_id=token.ticket_id, action_type=token.action_type,
         amount_minor=token.amount_minor, currency=token.currency,
-        idempotency_key=token.idempotency_key, approver=token.approver,
-        issued_ts=token.issued_ts,
+        charge_id=token.charge_id, idempotency_key=token.idempotency_key,
+        approver=token.approver, issued_ts=token.issued_ts,
     )
     if not hmac.compare_digest(expected_sig, token.signature):
         raise ExecutionRefused("bad_signature", "approval token signature invalid")
@@ -160,10 +181,14 @@ def authorize_execution(
         raise ExecutionRefused("token_mismatch", "token ticket != prepared ticket")
     if token.action_type != prepared.action_type.value:
         raise ExecutionRefused("action_mismatch", "token action != prepared action")
+    if token.charge_id != prepared.charge_id:
+        raise ExecutionRefused("charge_mismatch", "token charge != prepared charge")
 
     if token.issued_ts > now_ts:
         raise ExecutionRefused("future_token", "token issued in the future")
-    if now_ts - token.issued_ts > max_age_seconds:
+    # Cap the freshness window at a hard ceiling so a caller cannot disable it.
+    effective_age = min(max_age_seconds, MAX_ALLOWED_TOKEN_AGE_SECONDS)
+    if now_ts - token.issued_ts > effective_age:
         raise ExecutionRefused("expired", "approval token is stale")
 
     # Atomic check-and-set: reserve the key durably before authorizing. This is
@@ -174,5 +199,6 @@ def authorize_execution(
     return ExecuteInstruction(
         ticket_id=token.ticket_id, action_type=token.action_type,
         amount_minor=token.amount_minor, currency=token.currency,
-        idempotency_key=token.idempotency_key, approver=token.approver,
+        charge_id=token.charge_id, idempotency_key=token.idempotency_key,
+        approver=token.approver,
     )

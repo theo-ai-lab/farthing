@@ -49,11 +49,17 @@ def _facts(f: dict) -> AccountFacts:
 
 
 def _ceiling(f: AccountFacts) -> int:
+    # Mirrors the CUMULATIVE-cap definition in policy._refund_ceiling. Kept in
+    # sync deliberately, but the authoritative correctness check for the cap lives
+    # in test_policy with a hand-computed expected value (so a wrong ceiling
+    # definition here cannot mask a wrong engine).
     if not f.facts_are_coherent():
         return 0
     paid = Money(f.amount_paid_minor, f.currency)
-    remaining = paid.sub_clamped(Money(f.prior_refunds_minor, f.currency))
-    return remaining.min(pct_of(paid, f.plan_max_refund_pct)).minor_units
+    already = Money(f.prior_refunds_minor, f.currency)
+    remaining = paid.sub_clamped(already)
+    cap_remaining = pct_of(paid, f.plan_max_refund_pct).sub_clamped(already)
+    return remaining.min(cap_remaining).minor_units
 
 
 @unittest.skipUnless(GOLDEN.exists(), "golden set not generated yet")

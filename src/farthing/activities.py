@@ -89,8 +89,14 @@ async def compensate(refund_id: str, reason: str) -> None:
 async def execute_refund(
     token_d: dict, decision_d: dict, prepared_d: dict, charge_id: str
 ) -> dict:
-    """The only activity that moves money. Verifies the approval token against the
-    decision and prepared action before touching Stripe."""
+    """The only activity that moves money.
+
+    Ordering is the exactly-once boundary: the durable key reservation is
+    committed BEFORE Stripe is called and is never rolled back on a Stripe
+    failure. A retry therefore sees the key already reserved and resolves the
+    existing refund by metadata key rather than creating a second one — so a crash
+    between Stripe success and our commit cannot double-refund, even beyond
+    Stripe's idempotency window."""
     from .stripe_client import ExecuteClient
 
     s = approval_settings()
@@ -115,40 +121,52 @@ async def execute_refund(
 
     import time
 
+    import psycopg
+
     from .execution_guard import ExecutionRefused
     from .idempotency_store import PostgresIdempotencyStore
 
-    # Durable, transactional reservation — NOT an in-memory set. The reservation
-    # commits alongside the ledger write so exactly-once survives restarts.
-    import psycopg
+    client = ExecuteClient(s.stripe_execute_key.get_secret_value())
 
-    conn = psycopg.connect(s.database_url.get_secret_value())
-    store = PostgresIdempotencyStore(conn)
-    store.ensure_schema()
+    # The refund targets the charge BOUND by the approval, not the raw ticket
+    # input, so an unsigned charge_id cannot redirect the money.
+    bound_charge = prepared.charge_id or charge_id
 
-    try:
-        instr = authorize_execution(
-            s.approval_signing_secret.get_secret_value().encode(),
-            token=token, decision=decision, prepared=prepared,
-            store=store, now_ts=int(time.time()),
-        )
-    except ExecutionRefused as e:
-        conn.rollback()
-        # Non-retryable: a refused execution must never be retried into success.
-        raise ApplicationError(f"execution refused: {e.code}", non_retryable=True) from e
+    with psycopg.connect(s.database_url.get_secret_value()) as conn:
+        store = PostgresIdempotencyStore(conn)
+        store.ensure_schema()
+        try:
+            instr = authorize_execution(
+                s.approval_signing_secret.get_secret_value().encode(),
+                token=token, decision=decision, prepared=prepared,
+                store=store, now_ts=int(time.time()),
+            )
+        except ExecutionRefused as e:
+            if e.code == "replay":
+                # This key was already reserved (a prior attempt authorized it).
+                # Resolve idempotently: return the existing refund if Stripe has
+                # one; otherwise re-drive Stripe with the SAME key (Stripe dedups).
+                existing = client.find_refund_by_key(
+                    charge_id=bound_charge, idempotency_key=token.idempotency_key
+                )
+                if existing is not None:
+                    return existing
+                return client.create_refund(
+                    charge_id=bound_charge, amount_minor=token.amount_minor,
+                    idempotency_key=token.idempotency_key,
+                )
+            # Any other refusal is terminal and must never be retried into success.
+            raise ApplicationError(f"execution refused: {e.code}", non_retryable=True) from e
 
-    try:
-        client = ExecuteClient(s.stripe_execute_key.get_secret_value())
-        result = client.create_refund(
-            charge_id=charge_id,
-            amount_minor=instr.amount_minor,
-            idempotency_key=instr.idempotency_key,
-        )
-        conn.commit()  # reserve + (ledger write, in production) commit together
-        return result
-    except Exception:
-        conn.rollback()
-        raise
+        # Commit the reservation BEFORE touching Stripe, and do NOT roll it back on
+        # a Stripe failure — a retry must find the key reserved, not free.
+        conn.commit()
+
+    return client.create_refund(
+        charge_id=bound_charge,
+        amount_minor=instr.amount_minor,
+        idempotency_key=instr.idempotency_key,
+    )
 
 
 def facts_from_dict(d: dict) -> AccountFacts:

@@ -35,13 +35,19 @@ SECONDS_PER_DAY = 86_400
 
 
 def _refund_ceiling(facts: AccountFacts) -> Money:
-    """The most that could ever be refunded: the smaller of the remaining balance
-    (paid minus already-refunded) and the plan's max-refund-percent cap."""
+    """The most that could be refunded on THIS request.
+
+    The percentage cap is CUMULATIVE over the account's lifetime: it bounds
+    *total* refunds to ``max_refund_pct`` of the original payment, so a prior
+    refund reduces this transaction's cap. Otherwise paid=100, prior=50, cap=40%
+    would still allow 40 more (total 90) and breach the 40% cap. The ceiling is
+    the smaller of the remaining balance and the remaining room under the cap."""
     paid = Money(facts.amount_paid_minor, facts.currency)
     already = Money(facts.prior_refunds_minor, facts.currency)
     remaining = paid.sub_clamped(already)
-    cap = pct_of(paid, facts.plan_max_refund_pct)
-    return remaining.min(cap)
+    cap_total = pct_of(paid, facts.plan_max_refund_pct)
+    cap_remaining = cap_total.sub_clamped(already)
+    return remaining.min(cap_remaining)
 
 
 def _days_since_purchase(facts: AccountFacts) -> Decimal:
@@ -110,8 +116,10 @@ def _decide_cancellation(facts: AccountFacts) -> PolicyDecision:
 
 
 def _decide_plan_change(facts: AccountFacts) -> PolicyDecision:
-    # Plan change proration is computed by the billing system at execution time
-    # under Stripe's proration; the engine only gates eligibility here.
+    # The engine only GATES eligibility here and moves no money (amount 0). A plan
+    # change that should move money must, if ever wired for execution, compute and
+    # bind a preview proration amount into PreparedAction and the signed token and
+    # route through the same guard — it must never execute an unbound amount.
     if facts.subscription_status not in (
         SubscriptionStatus.ACTIVE,
         SubscriptionStatus.TRIALING,

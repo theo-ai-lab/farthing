@@ -54,6 +54,29 @@ class TestRefundPolicy(unittest.TestCase):
         )
         self.assertIs(d.disposition, Disposition.DENY)
 
+    def test_percentage_cap_is_cumulative_over_lifetime(self) -> None:
+        # Hand-computed, NOT derived from the engine's own ceiling logic:
+        # paid=100, prior_refund=50, cap=40% -> lifetime cap is 40 total, already
+        # exceeded by the 50 prior refund, so this request must yield 0 -> DENY.
+        d = decide(
+            refund_request(),
+            facts(amount_paid_minor=100, prior_refunds_minor=50,
+                  max_refund_pct="0.40", usage_fraction="0.0"),
+        )
+        self.assertEqual(d.amount_minor, 0)
+        self.assertIs(d.disposition, Disposition.DENY)
+
+    def test_percentage_cap_leaves_only_remaining_room(self) -> None:
+        # paid=100, prior=20, cap=50% -> lifetime cap 50, already used 20, so at
+        # most 30 more this time (and remaining balance is 80, so 30 binds).
+        d = decide(
+            refund_request(),
+            facts(amount_paid_minor=100, prior_refunds_minor=20,
+                  max_refund_pct="0.50", usage_fraction="0.0"),
+        )
+        self.assertIs(d.disposition, Disposition.ELIGIBLE)
+        self.assertEqual(d.amount_minor, 30)
+
     def test_incoherent_facts_escalate(self) -> None:
         d = decide(
             refund_request(),
@@ -76,6 +99,25 @@ class TestRefundPolicy(unittest.TestCase):
             plan_max_refund_pct=Decimal("1.0"),
         )
         d = decide(refund_request(), bad)
+        self.assertIs(d.disposition, Disposition.ESCALATE)
+        self.assertEqual(d.amount_minor, 0)
+
+    def test_float_money_field_escalates_not_crashes(self) -> None:
+        # A billing feed that delivers 5000.0 (float) instead of 5000 must
+        # ESCALATE, not crash Money()'s int guard inside decide().
+        from decimal import Decimal
+
+        from farthing.domain import AccountFacts, SubscriptionStatus
+
+        bad = AccountFacts(
+            subscription_id="s", invoice_id="i", currency="USD",
+            amount_paid_minor=5000.0, prior_refunds_minor=0,  # type: ignore[arg-type]
+            purchase_ts=0, now_ts=86_400,
+            usage_fraction=Decimal("0.0"), subscription_status=SubscriptionStatus.ACTIVE,
+            plan_refund_window_days=14, plan_allow_proration=True,
+            plan_max_refund_pct=Decimal("1.0"),
+        )
+        d = decide(refund_request(), bad)  # must not raise
         self.assertIs(d.disposition, Disposition.ESCALATE)
         self.assertEqual(d.amount_minor, 0)
 

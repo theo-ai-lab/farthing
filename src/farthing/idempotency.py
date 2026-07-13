@@ -31,7 +31,14 @@ def canonical_json(payload: Any) -> str:
             # format 'f' avoids scientific notation (e.g. 1E+2 -> "100").
             if not o.is_finite():
                 raise ValueError("non-finite Decimal cannot be a key/hash input")
-            return format(o.normalize(), "f")
+            n = o.normalize()
+            if n == 0:
+                n = Decimal(0)  # collapse -0 and 0 to a single canonical zero
+            if abs(n.adjusted()) > 1000:
+                # A pathological huge-exponent Decimal would render to a gigantic
+                # string (memory/DoS). Money never hits this; reject it outright.
+                raise ValueError("Decimal magnitude out of bounds for hashing")
+            return format(n, "f")
         raise TypeError(f"not JSON-serializable: {type(o).__name__}")
 
     return json.dumps(
@@ -40,8 +47,12 @@ def canonical_json(payload: Any) -> str:
 
 
 def derive_idempotency_key(workflow_id: str, step: str, payload: Any) -> str:
-    """Deterministic Stripe idempotency key: ``sha256(workflow_id|step|payload)``."""
+    """Deterministic Stripe idempotency key: ``sha256(workflow_id|step|payload)``.
+
+    Fields are length-prefixed so a value containing the delimiter cannot forge a
+    field boundary and collide two logically-distinct keys."""
     if not workflow_id or not step:
         raise ValueError("workflow_id and step are required")
-    material = f"{workflow_id}\x1f{step}\x1f{canonical_json(payload)}"
+    parts = (workflow_id, step, canonical_json(payload))
+    material = "|".join(f"{len(p)}:{p}" for p in parts)
     return "frthg_" + hashlib.sha256(material.encode("utf-8")).hexdigest()

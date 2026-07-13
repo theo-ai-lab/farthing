@@ -103,12 +103,15 @@ class BillingResolutionWorkflow:
             ticket_id=ticket.ticket_id, action_type=req.action_type,
             subscription_id=ticket.subscription_id, invoice_id=ticket.invoice_id,
             amount_minor=decision.amount_minor, currency=decision.currency,
-            policy_version=decision.policy_version, reason_codes=decision.reason_codes,
+            policy_version=decision.policy_version, charge_id=ticket.charge_id,
+            reason_codes=decision.reason_codes,
         )
+        # Key on stable logical identity (ticket + action) only — NOT the amount —
+        # so any second execution of the same ticket is refused regardless of the
+        # amount approved. The signed token binds the amount.
         idem_key = derive_idempotency_key(
             workflow.info().workflow_id, "execute_refund",
-            {"amount": decision.amount_minor, "currency": decision.currency,
-             "ticket": ticket.ticket_id},
+            {"ticket": ticket.ticket_id},
         )
 
         # Publish the pending prepared action + idempotency key for the approval

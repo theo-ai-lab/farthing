@@ -44,6 +44,17 @@ class TestIdempotency(unittest.TestCase):
         self.assertEqual(canonical_json({"x": Decimal("100")}), '{"x":"100"}')
         self.assertEqual(canonical_json({"x": Decimal("1E+2")}), '{"x":"100"}')
 
+    def test_negative_zero_canonicalizes_to_zero(self) -> None:
+        self.assertEqual(canonical_json({"x": Decimal("-0")}), '{"x":"0"}')
+        self.assertEqual(
+            derive_idempotency_key("wf", "s", {"x": Decimal("-0")}),
+            derive_idempotency_key("wf", "s", {"x": Decimal("0")}),
+        )
+
+    def test_pathological_exponent_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            canonical_json({"x": Decimal("1E+2000")})
+
     def test_requires_ids(self) -> None:
         with self.assertRaises(ValueError):
             derive_idempotency_key("", "s", {})

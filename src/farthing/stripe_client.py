@@ -81,11 +81,32 @@ class ExecuteClient:
     def create_refund(
         self, *, charge_id: str, amount_minor: int, idempotency_key: str, reason: str = "requested_by_customer"
     ) -> dict:
-        """Create a refund. The idempotency key is caller-derived and deterministic;
-        Stripe collapses any retry with the same key into the original refund."""
+        """Create a refund on the bound charge. The idempotency key is
+        caller-derived and deterministic, so any retry within Stripe's window
+        collapses into the original refund. The key is ALSO persisted into refund
+        metadata so a retry after that window (or a crash) can resolve the existing
+        refund by key instead of creating a duplicate — see ``find_refund_by_key``.
+        Stripe always refunds in the charge's own currency; the guard validates
+        that the decided currency equals the charge/invoice currency upstream."""
         refund = self._c.refunds.create(
-            {"charge": charge_id, "amount": amount_minor, "reason": reason},
+            {
+                "charge": charge_id, "amount": amount_minor, "reason": reason,
+                "metadata": {"farthing_idempotency_key": idempotency_key},
+            },
             {"idempotency_key": idempotency_key},
         )
         return {"id": refund.id, "amount": int(refund.amount), "status": refund.status,
+                "currency": refund.currency, "idempotency_key": idempotency_key,
                 "api_version": STRIPE_API_VERSION}
+
+    def find_refund_by_key(self, *, charge_id: str, idempotency_key: str) -> dict | None:
+        """Look up an already-created refund by the Farthing key stored in metadata.
+        Used to resolve a retried execution idempotently (return the existing refund
+        rather than create a second one) even after Stripe's idempotency window."""
+        refunds = self._c.refunds.list({"charge": charge_id, "limit": 100})
+        for r in refunds.data:
+            if dict(getattr(r, "metadata", {})).get("farthing_idempotency_key") == idempotency_key:
+                return {"id": r.id, "amount": int(r.amount), "status": r.status,
+                        "currency": r.currency, "idempotency_key": idempotency_key,
+                        "api_version": STRIPE_API_VERSION}
+        return None

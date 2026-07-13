@@ -143,6 +143,28 @@ class TestExecutionGuard(unittest.TestCase):
         # way it is refused, which is the point.
         self.assertIn(ctx.exception.code, ("bad_signature", "action_mismatch"))
 
+    def test_charge_binding(self) -> None:
+        # Token is signed for charge ch_1; executing against ch_2 must be refused.
+        decision, prepared = _eligible()
+        prepared = replace(prepared, charge_id="ch_1")
+        tok = _token(prepared)
+        with self.assertRaises(ExecutionRefused) as ctx:
+            authorize_execution(
+                SECRET, token=tok, decision=decision,
+                prepared=replace(prepared, charge_id="ch_2"),
+                store=InMemoryIdempotencyStore(), now_ts=NOW,
+            )
+        self.assertIn(ctx.exception.code, ("bad_signature", "charge_mismatch"))
+
+    def test_bound_charge_flows_to_instruction(self) -> None:
+        decision, prepared = _eligible()
+        prepared = replace(prepared, charge_id="ch_bound")
+        instr = authorize_execution(
+            SECRET, token=_token(prepared), decision=decision, prepared=prepared,
+            store=InMemoryIdempotencyStore(), now_ts=NOW,
+        )
+        self.assertEqual(instr.charge_id, "ch_bound")
+
     def test_wrong_secret_rejected(self) -> None:
         decision, prepared = _eligible()
         tok = issue_approval_token(b"other-secret", prepared=prepared,
