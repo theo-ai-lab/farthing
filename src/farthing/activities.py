@@ -86,9 +86,7 @@ async def compensate(refund_id: str, reason: str) -> None:
 # ---- Execute-side activity (EXECUTE scope — separate worker) ----------------
 
 @activity.defn
-async def execute_refund(
-    token_d: dict, decision_d: dict, prepared_d: dict, charge_id: str
-) -> dict:
+async def execute_refund(token_d: dict, decision_d: dict, prepared_d: dict) -> dict:
     """The only activity that moves money.
 
     Ordering is the exactly-once boundary: the durable key reservation is
@@ -160,7 +158,10 @@ async def execute_refund(
 
         # Reservation + hash-chained ledger entry are written and committed in ONE
         # transaction BEFORE Stripe, and never rolled back on a Stripe failure, so
-        # a crash cannot leave money moved without an audit row (or vice versa).
+        # money can never move without a durable audit row. The deliberate cost of
+        # audit-before-money ordering: a permanent Stripe failure leaves an audit
+        # row with no refund — the safe direction, caught by reconcile.py as
+        # unmatched_in_ledger and raised as an incident.
         pg_ledger.append_executed_refund(
             conn, timestamp=int(time.time()), ticket_id=instr.ticket_id,
             amount_minor=instr.amount_minor, currency=instr.currency,

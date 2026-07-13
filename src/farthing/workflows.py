@@ -133,7 +133,7 @@ class BillingResolutionWorkflow:
         # Execute on the EXECUTE task queue only — the agent worker cannot run this.
         refund = await workflow.execute_activity(
             "execute_refund",
-            args=[self._approval.token, asdict(decision), asdict(prepared), ticket.charge_id],
+            args=[self._approval.token, asdict(decision), asdict(prepared)],
             task_queue="farthing-execute",
             start_to_close_timeout=timedelta(seconds=60),
             retry_policy=RetryPolicy(maximum_attempts=3, non_retryable_error_types=["ApplicationError"]),

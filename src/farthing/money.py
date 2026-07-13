@@ -62,14 +62,17 @@ def zero(currency: str) -> Money:
     return Money(0, currency)
 
 
-# ISO-4217 minor-unit exponents that are not 2. Refunds and the human-facing
-# approval preview MUST format by the real exponent, or a reviewer approving a
-# "50.00 JPY" refund is actually looking at ¥5000 shown as ¥50.00.
+# Minor-unit exponents that are not 2. Sourced from Stripe's own zero-decimal and
+# three-decimal currency lists, because every amount in Farthing is a Stripe minor
+# unit — the display exponent MUST match how Stripe interprets the integer, or a
+# reviewer approving "5000.00 MGA" is actually authorizing 500,000 ariary (Stripe
+# treats MGA as zero-decimal). Getting this wrong defeats the human amount-gate.
+# https://docs.stripe.com/currencies#zero-decimal  /  #three-decimal
 _ZERO_DECIMAL = frozenset({
-    "JPY", "KRW", "VND", "CLP", "PYG", "XAF", "XOF", "XPF", "BIF", "DJF",
-    "GNF", "ISK", "KMF", "RWF", "UGX", "VUV", "XCD",
+    "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF",
+    "UGX", "VND", "VUV", "XAF", "XOF", "XPF",
 })
-_THREE_DECIMAL = frozenset({"BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"})
+_THREE_DECIMAL = frozenset({"BHD", "JOD", "KWD", "OMR", "TND"})
 
 
 def minor_unit_exponent(currency: str) -> int:

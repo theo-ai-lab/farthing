@@ -67,6 +67,13 @@ class TestMoney(unittest.TestCase):
         self.assertEqual(minor_unit_exponent("JPY"), 0)
         self.assertEqual(minor_unit_exponent("KWD"), 3)
 
+    def test_stripe_special_currencies_are_correct(self) -> None:
+        # MGA is zero-decimal on Stripe (must NOT divide by 100); XCD is 2-decimal.
+        self.assertEqual(minor_unit_exponent("MGA"), 0)
+        self.assertEqual(format_money(500000, "MGA"), "500000 MGA")
+        self.assertEqual(minor_unit_exponent("XCD"), 2)
+        self.assertEqual(format_money(5000, "XCD"), "50.00 XCD")
+
 
 if __name__ == "__main__":
     unittest.main()
