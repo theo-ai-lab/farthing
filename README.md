@@ -11,6 +11,19 @@ is afraid to automate: it *acts* on the billing system. The interesting
 engineering is therefore not the prompt — it is making an LLM-driven workflow
 safe enough to move money.
 
+## Quick start
+
+The money-safety invariant is provable in about a second, with **zero installs**:
+
+```bash
+git clone <this repo> && cd farthing
+make verify          # 78 tests + the 152-case adversarial gate, pure stdlib
+```
+
+You'll see the gate block \$385,021.39 of out-of-policy refund demands with \$0
+executed beyond policy. `make help` lists everything else; the full stack (live
+Stripe/Temporal) is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+
 ---
 
 ## The one invariant
