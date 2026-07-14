@@ -47,7 +47,10 @@ uv run farthing-inbox                    # http://127.0.0.1:8080/inbox
 
 In the Stripe Dashboard (test mode) → Developers → API keys → Restricted keys:
 
-- **PREPARE key**: Refunds = *None*, Charges/Invoices/Subscriptions = *Read*.
+- **PREPARE key**: Refunds = *Read*, Subscriptions/Invoices = *Read* (add Charges +
+  PaymentIntents *Read* for robustness). Refunds must be **Read, not None** — the
+  agent lists prior refunds to compute the cumulative cap — but never *Write*, so it
+  still cannot create a refund.
 - **EXECUTE key**: Refunds = *Write*, everything else *None*.
 
 The whole point is that the agent worker's key cannot create a refund.
