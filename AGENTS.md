@@ -45,7 +45,8 @@ docker compose up -d                                   # Temporal + Postgres + U
 ./scripts/register_search_attribute.sh                 # one-time: farthing_state search attr
 
 # 2. Stripe test-mode restricted keys (two DIFFERENT keys):
-#    PREPARE = read charges/invoices/subscriptions/customers, Refunds=None
+#    PREPARE = Read on subscriptions/invoices/refunds (+charges/paymentintents);
+#              Refunds=Read (NOT None — it lists prior refunds), never Write
 #    EXECUTE = Refunds=Write, everything else None
 #    Seed the objects a ticket needs and copy the printed ids:
 FARTHING_STRIPE_SEED_KEY=sk_test_xxx uv run python scripts/seed_stripe_testmode.py
