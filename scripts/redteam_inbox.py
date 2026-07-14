@@ -33,12 +33,17 @@ FORM = urlencode({"csrf": "forged-token"}).encode()
 
 
 def _status(method: str, path: str, headers: dict[str, str], data: bytes | None = None) -> int:
+    """Status code of one probe; 0 for timeout/connection failure. A hung or dead
+    inbox must land as a recorded FAIL on that check, not a traceback that aborts
+    the remaining probes."""
     req = urllib.request.Request(f"{BASE}{path}", method=method, headers=headers, data=data)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return resp.status
     except urllib.error.HTTPError as e:
         return e.code
+    except (TimeoutError, urllib.error.URLError, ConnectionError, OSError):
+        return 0
 
 
 # name, method, path, headers, body, expected status, verdict-word-if-expected
@@ -70,7 +75,8 @@ def main() -> None:
         got = _status(method, path, headers, body)
         ok = got == expected
         failures += 0 if ok else 1
-        print(f"{name:<34}{expected:>6}{got:>6}  {'PASS' if ok else 'FAIL <-- NOT BLOCKED'}")
+        verdict = "PASS" if ok else ("FAIL <-- NO RESPONSE" if got == 0 else "FAIL <-- NOT BLOCKED")
+        print(f"{name:<34}{expected:>6}{got:>6}  {verdict}")
 
     print("-" * 60)
     if failures:

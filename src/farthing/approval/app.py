@@ -32,6 +32,7 @@ import secrets
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
+from datetime import timedelta
 from html import escape
 from typing import Any
 
@@ -225,11 +226,16 @@ async def _load_pending() -> list[PreparedAction]:
     finished between the visibility scan and the query."""
     client = await _client()
     out: list[PreparedAction] = []
-    async for wf in client.list_workflows("farthing_state = 'awaiting_approval'"):
+    # ExecutionStatus filter matters: a query to a non-running workflow whose
+    # task queue no longer has a worker does not fail — it parks waiting for one,
+    # which would hang this page forever. The rpc_timeout is the backstop for the
+    # same hang on a still-running workflow whose worker is down.
+    query = "farthing_state = 'awaiting_approval' AND ExecutionStatus = 'Running'"
+    async for wf in client.list_workflows(query):
         try:
             handle = client.get_workflow_handle(wf.id)
-            d = await handle.query("prepared_action")
-        except Exception:  # a workflow that just finished mid-scan is no longer queryable; skip it
+            d = await handle.query("prepared_action", rpc_timeout=timedelta(seconds=5))
+        except Exception:  # finished mid-scan or worker unreachable; skip it
             continue
         if d:
             out.append(_prepared_from_query(d))
@@ -242,7 +248,12 @@ async def _load_prepared(ticket_id: str) -> PreparedAction:
     rather than executed against an unsigned target."""
     client = await _client()
     handle = client.get_workflow_handle(_workflow_id(ticket_id))
-    d = await handle.query("prepared_action")
+    try:
+        d = await handle.query("prepared_action", rpc_timeout=timedelta(seconds=5))
+    except HTTPException:
+        raise
+    except Exception as e:  # not queryable (finished, missing, or worker unreachable)
+        raise HTTPException(status_code=409, detail="ticket is not awaiting approval") from e
     if not d:
         raise HTTPException(status_code=409, detail="ticket is not awaiting approval")
     if d.get("action_type") == ActionType.REFUND.value and not d.get("charge_id"):
