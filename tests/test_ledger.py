@@ -40,10 +40,10 @@ class TestLedger(unittest.TestCase):
         led.append(
             timestamp=1000, ticket_id="t1", action_type="refund", disposition="refunded",
             amount_minor=5000, currency="USD", policy_version="2026.07.1",
-            api_version="2026-06-30.acacia",
+            api_version="2026-06-24.dahlia",
         )
         e = led.entries()[0]
-        self.assertEqual(e.api_version, "2026-06-30.acacia")
+        self.assertEqual(e.api_version, "2026-06-24.dahlia")
         # Tampering the recorded API version breaks the chain.
         forged = replace(e, api_version="2020-01-01.legacy")
         self.assertFalse(verify_chain([forged]))

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from typing import Any
 
 import stripe
@@ -31,17 +32,29 @@ def _require_test_key() -> str:
 
 
 def _charge_id(client: stripe.StripeClient, invoice: Any) -> str | None:
-    """Resolve the charge for an invoice across API-version shapes: the legacy
-    invoice.charge, else the payment_intent's latest_charge."""
+    """Resolve the charge for an invoice across API-version shapes: legacy
+    invoice.charge, else the invoice payment -> payment_intent -> latest_charge.
+    Retries briefly because a subscription's first invoice settles asynchronously."""
     charge = getattr(invoice, "charge", None)
     if charge:
         return str(charge)
-    pi_id = getattr(invoice, "payment_intent", None)
+    inv: Any = client.v1.invoices.retrieve(invoice.id, {"expand": ["payments"]})
+    pi_id = getattr(inv, "payment_intent", None)
+    if not pi_id:
+        payments = getattr(inv, "payments", None)
+        data = getattr(payments, "data", None) if payments is not None else None
+        if data:
+            payment = getattr(data[0], "payment", None)
+            pi_id = getattr(payment, "payment_intent", None) if payment is not None else None
     if not pi_id:
         return None
-    pi: Any = client.v1.payment_intents.retrieve(str(pi_id))
-    latest = getattr(pi, "latest_charge", None)
-    return str(latest) if latest else None
+    for _ in range(10):
+        pi: Any = client.v1.payment_intents.retrieve(str(pi_id))
+        latest = getattr(pi, "latest_charge", None)
+        if latest:
+            return str(latest)
+        time.sleep(1.5)
+    return None
 
 
 def main() -> None:

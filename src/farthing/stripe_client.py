@@ -24,7 +24,7 @@ from .domain import AccountFacts, RefundResult, SubscriptionStatus
 
 # Pin the API version alongside the library major so behavior is reproducible and
 # auditable. Record this string in the ledger with every executed refund.
-STRIPE_API_VERSION = "2026-06-30.acacia"
+STRIPE_API_VERSION = "2026-06-24.dahlia"
 
 _STATUS_MAP = {
     "active": SubscriptionStatus.ACTIVE,
@@ -42,18 +42,41 @@ class PrepareClient:
     def __init__(self, api_key: str) -> None:
         self._c = stripe.StripeClient(api_key, stripe_version=STRIPE_API_VERSION)
 
+    def _charge_for_invoice(self, invoice: Any) -> str | None:
+        """Resolve the charge backing an invoice across Stripe API-version shapes.
+        Older versions expose ``invoice.charge``; newer ones (e.g. 2026-06-24.dahlia)
+        drop it and link the charge only via the invoice's payment ->
+        payment_intent -> latest_charge. A refund needs this exact charge."""
+        charge = getattr(invoice, "charge", None)
+        if charge:
+            return str(charge)
+        pi_id = getattr(invoice, "payment_intent", None)
+        if not pi_id:
+            payments = getattr(invoice, "payments", None)
+            data = getattr(payments, "data", None) if payments is not None else None
+            if data:
+                payment = getattr(data[0], "payment", None)
+                pi_id = getattr(payment, "payment_intent", None) if payment is not None else None
+        if not pi_id:
+            return None
+        pi: Any = self._c.v1.payment_intents.retrieve(str(pi_id))
+        latest = getattr(pi, "latest_charge", None)
+        return str(latest) if latest else None
+
     def fetch_facts(self, *, subscription_id: str, invoice_id: str | None, now_ts: int) -> AccountFacts:
         # Stripe SDK objects are dynamically shaped and only partially typed by the
         # stubs; hold them as Any at this boundary and narrow every value into the
         # strongly-typed AccountFacts below. The `.v1.` accessors are the current,
         # non-deprecated service surface in the pinned Stripe major.
         sub: Any = self._c.v1.subscriptions.retrieve(subscription_id)
-        invoice: Any = self._c.v1.invoices.retrieve(invoice_id) if invoice_id else None
+        invoice: Any = (
+            self._c.v1.invoices.retrieve(invoice_id, {"expand": ["payments"]}) if invoice_id else None
+        )
 
         amount_paid = int(invoice.amount_paid) if invoice else 0
         currency = str(invoice.currency if invoice else sub.currency or "usd").upper()
 
-        charge_id = getattr(invoice, "charge", None) if invoice is not None else None
+        charge_id = self._charge_for_invoice(invoice) if invoice is not None else None
         prior_refunds = 0
         if charge_id:
             # Auto-paginate: a charge with >100 prior refunds must not be
@@ -61,14 +84,13 @@ class PrepareClient:
             for r in self._c.v1.refunds.list({"charge": charge_id, "limit": 100}).auto_paging_iter():
                 prior_refunds += int(r.amount)
 
-        # Walk the dynamically-shaped subscription payload defensively; each hop
-        # stays Any so a missing field yields None (guarded) instead of forcing a
-        # typed empty-dict literal into the expression.
-        sub_items: Any = sub.get("items")
-        data: Any = sub_items.get("data") if sub_items else None
-        plan: Any = data[0]["price"] if data else None
-        meta_raw: Any = plan.get("metadata") if plan else None
-        meta: dict[str, Any] = dict(meta_raw) if meta_raw else {}
+        # Walk the subscription payload with the SDK's real access model: a
+        # ListObject exposes .data (a list), nested resources are subscriptable, and
+        # a StripeObject has no .get — so plan metadata is converted to a plain dict
+        # via .to_dict() before it is read with .get() below.
+        items_data: Any = sub["items"].data
+        plan: Any = items_data[0]["price"] if items_data else None
+        meta: dict[str, Any] = plan["metadata"].to_dict() if plan is not None and "metadata" in plan else {}
 
         return AccountFacts(
             subscription_id=subscription_id,
