@@ -143,9 +143,19 @@ class BillingResolutionWorkflow:
         )
         await workflow.wait_condition(lambda: self._approval is not None or self._denied)
 
+        # Leave the awaiting-approval state in visibility the moment the gate
+        # resolves: the approval inbox lists pending work by this attribute, and a
+        # completed workflow that still reads "awaiting_approval" would be scanned
+        # (and queried) by the inbox forever.
         if self._denied or self._approval is None:
+            workflow.upsert_search_attributes(  # pyright: ignore[reportUnknownMemberType]  # temporalio stub gap
+                [FARTHING_STATE.value_set("denied")]
+            )
             reply = await self._reply("denied_by_reviewer", 0, decision.currency, req.raw_text)
             return TicketResult("denied_by_reviewer", 0, decision.currency, None, reply)
+        workflow.upsert_search_attributes(  # pyright: ignore[reportUnknownMemberType]  # temporalio stub gap
+            [FARTHING_STATE.value_set("approved")]
+        )
 
         # Execute on the EXECUTE task queue only — the agent worker cannot run this.
         # execute_refund is idempotent by construction (durable reservation + Stripe
@@ -164,6 +174,9 @@ class BillingResolutionWorkflow:
             # Terminal execution failure (guard refusal or exhausted retries). Money
             # did not move; dead-letter the ticket for human resolution instead of
             # crashing the workflow. The nightly reconciliation also surfaces it.
+            workflow.upsert_search_attributes(  # pyright: ignore[reportUnknownMemberType]  # temporalio stub gap
+                [FARTHING_STATE.value_set("dead_lettered")]
+            )
             await workflow.execute_activity(
                 "record_dead_letter",
                 args=[ticket.ticket_id, "execution_failed", decision.amount_minor,
@@ -175,6 +188,9 @@ class BillingResolutionWorkflow:
             reply = await self._reply("execution_failed", 0, decision.currency, req.raw_text)
             return TicketResult("dead_lettered", 0, decision.currency, None, reply)
 
+        workflow.upsert_search_attributes(  # pyright: ignore[reportUnknownMemberType]  # temporalio stub gap
+            [FARTHING_STATE.value_set("refunded")]
+        )
         reply = await self._reply("refunded", decision.amount_minor, decision.currency, req.raw_text)
         return TicketResult(
             disposition="refunded", amount_minor=decision.amount_minor,
