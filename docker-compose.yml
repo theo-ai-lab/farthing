@@ -15,7 +15,7 @@ services:
       - "5432:5432"
 
   temporal:
-    image: temporalio/auto-setup:1.31.2
+    image: temporalio/auto-setup:1.29.7
     depends_on:
       - postgres
     environment:
@@ -28,7 +28,7 @@ services:
       - "7233:7233"
 
   temporal-ui:
-    image: temporalio/ui:2.40.0
+    image: temporalio/ui:2.52.1
     depends_on:
       - temporal
     environment:
