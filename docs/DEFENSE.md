@@ -1,8 +1,9 @@
-# Defense — how to explain and defend Farthing
+# Design rationale — defending every load-bearing decision
 
-Karpathy's line is "you can
-outsource your thinking, but you can't outsource your understanding" — this page is
-about being able to defend every load-bearing decision without the repo open.
+Karpathy's line is "you can outsource your thinking, but you can't outsource your
+understanding" — this page is the understanding: the questions a skeptical engineer
+asks about an LLM workflow that is allowed to touch money, and the design decisions
+that answer them.
 
 ## The one-sentence pitch
 
