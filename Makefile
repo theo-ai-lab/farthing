@@ -16,13 +16,13 @@ verify:  ## Prove the money invariant (78 tests, zero installs)
 
 core: verify  ## Alias for verify
 
-lint:  ## Lint with ruff (needs uv sync)
+lint:  ## Lint with ruff (needs uv sync --all-extras)
 	uv run ruff check .
 
-types:  ## Strict type-check the money core (needs uv sync)
+types:  ## Strict type-check the money core (needs uv sync --all-extras)
 	uv run pyright
 
-test:  ## Full test suite via pytest (needs uv sync)
+test:  ## Full test suite via pytest (needs uv sync --all-extras)
 	uv run pytest -q
 
 infra:  ## Start Temporal + Postgres locally
