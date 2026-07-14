@@ -20,11 +20,38 @@ import os
 from temporalio.client import Client
 from temporalio.contrib.opentelemetry import TracingInterceptor
 from temporalio.worker import Worker
+from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
 
 from . import activities
 from .config import approval_settings, worker_settings
 from .observability import configure_tracing
 from .workflows import BillingResolutionWorkflow, ReconciliationWorkflow
+
+
+def workflow_sandbox_runner() -> SandboxedWorkflowRunner:
+    """Sandbox runner for any worker that hosts workflows.
+
+    The pure core must be passed through at the RUNNER level, not only via the
+    ``imports_passed_through()`` block inside ``workflows.py``: the sandbox
+    imports the package ``__init__`` (which imports ``.domain``/``.policy``)
+    before the workflow module's block runs, so sandboxed copies of those
+    modules would already exist and win — and enum identity checks in the
+    policy gate then fail closed, escalating every eligible ticket as
+    ``unknown_action_type``. Runner-level passthrough resolves these names to
+    the host modules no matter who imports them first. Everything listed is
+    deterministic pure stdlib, so it is sandbox-safe by construction
+    (``tests/test_workflow_sandbox.py`` locks this).
+    """
+    return SandboxedWorkflowRunner(
+        restrictions=SandboxRestrictions.default.with_passthrough_modules(
+            "farthing.domain",
+            "farthing.execution_guard",
+            "farthing.idempotency",
+            "farthing.ledger",
+            "farthing.money",
+            "farthing.policy",
+        )
+    )
 
 
 async def _run_agent() -> None:
@@ -41,6 +68,7 @@ async def _run_agent() -> None:
     async with Worker(
         client,
         task_queue=s.task_queue,
+        workflow_runner=workflow_sandbox_runner(),
         workflows=[BillingResolutionWorkflow, ReconciliationWorkflow],
         activities=[
             activities.extract,
