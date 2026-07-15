@@ -11,6 +11,12 @@ is afraid to automate: it *acts* on the billing system. The interesting
 engineering is therefore not the prompt — it is making an LLM-driven workflow
 safe enough to move money.
 
+![Farthing resolving a refund end-to-end: a ticket becomes a policy-decided, fully-previewed action; a human clicks Approve; the refund executes exactly once against Stripe.](docs/demo.gif)
+
+*A ticket arrives, the policy engine decides the exact amount, the workflow parks
+on the approval gate, a human clicks **Approve — move 50.00 USD**, and the refund
+executes exactly once in Stripe test mode (local Temporal + Postgres, real time).*
+
 ## Quick start
 
 The money-safety invariant is provable in about a second, with **zero installs**:
