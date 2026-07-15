@@ -26,26 +26,27 @@ by anyone who clones the repo, with no network.
 
 ## 2. Latency: manual baseline vs Farthing
 
-- **Manual baseline** — the documented industry norm for a human handling a
-  billing refund is one to two business days per ticket (source cited inline in
-  the repo write-up). Where a self-timed baseline is used instead, the timing
-  script and the ticket sample are committed.
-- **Farthing** — measured wall-clock from ticket ingestion to executed refund on
-  the demo tenant, including the human approval click. Reported as a median over
-  the demo ticket set, with the approval-wait time broken out separately (it is
-  human latency, not system latency).
+- **Manual baseline** — an industry-standard assumption of one to two business
+  days for a human-handled billing refund. This is an assumption, not a measured
+  number, and it is labeled as such wherever it appears.
+- **Farthing** — wall-clock from ticket ingestion to executed refund on the demo
+  tenant, including the human approval click, with the approval-wait time broken
+  out separately (it is human latency, not system latency). With no production
+  ticket sample committed, this is a method statement, not a headline number —
+  see the honest limit below.
 
 ## 3. Integrity: nightly reconciliation
 
-The reconciliation report (`farthing.reconcile`) over the demo tenant shows
-ledger-to-Stripe agreement. "100% agreement, zero orphaned transactions" means
-every executed refund appears on both sides with the same amount.
+The reconciliation report (`farthing.reconcile`) compares the ledger to Stripe
+refund-by-refund. Agreement means every executed refund appears on both sides
+with the same amount; an orphan on either side is reported as an incident, never
+silently dropped.
 
 ## The honest limit
 
 With no real merchant, the volume and latency numbers are **demo-tenant / Stripe
-test-mode** measurements, not production traffic. Every figure in the README and
-the portfolio write-up is framed that way. The safety numbers (the golden-set
+test-mode** measurements, not production traffic. Every figure in the README is
+framed that way. The safety numbers (the golden-set
 gate) are fully real regardless of merchant, because they exercise the actual
 decision engine on a fixed adversarial distribution. The single most valuable next
 step is one design-partner merchant whose latency and integrity numbers are

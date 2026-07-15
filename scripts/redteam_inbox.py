@@ -1,5 +1,5 @@
-"""Adversarial probe of the RUNNING approval inbox — the "ten agents try to break
-the deployed thing" test, aimed at the money gate's HTTP boundary.
+"""Adversarial probe of the RUNNING approval inbox — hostile requests aimed at
+the money gate's HTTP boundary.
 
 It sends hostile requests to a live inbox and asserts each is refused: an
 unauthenticated read, the header-spoof bypass (identity header without the proxy
@@ -46,20 +46,20 @@ def _status(method: str, path: str, headers: dict[str, str], data: bytes | None 
         return 0
 
 
-# name, method, path, headers, body, expected status, verdict-word-if-expected
+# name, method, path, headers, body, expected status
 CHECKS = [
-    ("unauthenticated read",        "GET",  "/inbox", {}, None, 401, "blocked"),
-    ("identity-header spoof",       "GET",  "/inbox", {"X-Reviewer-Email": REVIEWER}, None, 401, "blocked"),
+    ("unauthenticated read",        "GET",  "/inbox", {}, None, 401),
+    ("identity-header spoof",       "GET",  "/inbox", {"X-Reviewer-Email": REVIEWER}, None, 401),
     ("wrong proxy secret",          "GET",  "/inbox",
-     {"X-Proxy-Auth": "not-the-secret", "X-Reviewer-Email": REVIEWER}, None, 401, "blocked"),
+     {"X-Proxy-Auth": "not-the-secret", "X-Reviewer-Email": REVIEWER}, None, 401),
     ("CONTROL: legit read",         "GET",  "/inbox",
-     {"X-Proxy-Auth": SECRET, "X-Reviewer-Email": "reviewer@example.com"}, None, 200, "allowed"),
+     {"X-Proxy-Auth": SECRET, "X-Reviewer-Email": "reviewer@example.com"}, None, 200),
     ("approve, forged CSRF (no cookie)", "POST", "/inbox/demo-001/approve",
      {"X-Proxy-Auth": SECRET, "X-Reviewer-Email": "reviewer@example.com",
-      "Content-Type": "application/x-www-form-urlencoded"}, FORM, 403, "blocked"),
+      "Content-Type": "application/x-www-form-urlencoded"}, FORM, 403),
     ("approve, forged CSRF + cookie", "POST", "/inbox/demo-001/approve",
      {"X-Proxy-Auth": SECRET, "X-Reviewer-Email": "reviewer@example.com",
-      "Content-Type": "application/x-www-form-urlencoded", "Cookie": "fh_session=forged"}, FORM, 403, "blocked"),
+      "Content-Type": "application/x-www-form-urlencoded", "Cookie": "fh_session=forged"}, FORM, 403),
 ]
 
 
@@ -71,7 +71,7 @@ def main() -> None:
     print(f"{'attack':<34}{'want':>6}{'got':>6}  result")
     print("-" * 60)
     failures = 0
-    for name, method, path, headers, body, expected, _word in CHECKS:
+    for name, method, path, headers, body, expected in CHECKS:
         got = _status(method, path, headers, body)
         ok = got == expected
         failures += 0 if ok else 1

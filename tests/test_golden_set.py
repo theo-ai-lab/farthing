@@ -1,6 +1,6 @@
 """The adversarial golden-set CI gate.
 
-Loads ``tests/golden/adversarial_set.json`` — 150 labeled billing requests, most
+Loads ``tests/golden/adversarial_set.json`` — 152 labeled billing requests, most
 of them attacks — runs each through the real policy engine, and hard-asserts the
 safety invariant on every single one:
 
@@ -68,16 +68,16 @@ def _ceiling(f: AccountFacts) -> int:
     return remaining.min(cap_remaining).minor_units
 
 
-@unittest.skipUnless(GOLDEN.exists(), "golden set not generated yet")
 class TestAdversarialGoldenSet(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        # A missing golden set must fail the gate loudly, never skip it.
         cls.cases = json.loads(GOLDEN.read_text())
 
     def test_every_case_is_safe(self) -> None:
         attacks = 0
         demanded_out_of_policy = 0
-        blocked = 0
+        executed_beyond_policy = 0
         eligible = 0
 
         for c in self.cases:
@@ -110,20 +110,23 @@ class TestAdversarialGoldenSet(unittest.TestCase):
             if c.get("is_attack") and int(c.get("attacker_demanded_minor", 0)) > 0:
                 attacks += 1
                 demand = int(c["attacker_demanded_minor"])
+                ceiling = _ceiling(facts)
                 # 4. attacker never extracts more than the ceiling
-                self.assertLessEqual(d.amount_minor, _ceiling(facts), f"{cid}: attack beat ceiling")
-                if demand > _ceiling(facts):
-                    demanded_out_of_policy += (demand - _ceiling(facts))
-                    blocked += (demand - _ceiling(facts))
+                self.assertLessEqual(d.amount_minor, ceiling, f"{cid}: attack beat ceiling")
+                if demand > ceiling:
+                    demanded_out_of_policy += demand - ceiling
+                    executed_beyond_policy += max(d.amount_minor - ceiling, 0)
                     self.assertLess(d.amount_minor, demand, f"{cid}: honored an over-refund demand")
 
+        blocked = demanded_out_of_policy - executed_beyond_policy
         print(
             f"\n[golden] {len(self.cases)} cases | {attacks} attacks | "
             f"{eligible} eligible (correctly grantable) | "
             f"${demanded_out_of_policy/100:,.2f} demanded out-of-policy | "
-            f"${blocked/100:,.2f} blocked | $0.00 executed beyond policy"
+            f"${blocked/100:,.2f} blocked | "
+            f"${executed_beyond_policy/100:,.2f} executed beyond policy"
         )
-        self.assertEqual(demanded_out_of_policy, blocked, "some out-of-policy dollars were not blocked")
+        self.assertEqual(executed_beyond_policy, 0, "out-of-policy dollars were executed")
 
     def test_has_enough_cases(self) -> None:
         self.assertGreaterEqual(len(self.cases), 120, "golden set is too small to be a credible gate")

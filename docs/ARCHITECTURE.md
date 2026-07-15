@@ -17,9 +17,9 @@ ever executes twice or without approval.**
 | Can move money | **no** | yes, and only after a signed approval |
 
 The agent worker has no code path and no credential that can create a refund. The
-execute worker has no LLM surface. `sessions`/deploys of one cannot escalate into
-the other because the capability is the credential, and the credentials live in
-different processes.
+execute worker has no LLM surface. A compromise of one process cannot escalate
+into the other because the capability is the credential, and the credentials live
+in different processes.
 
 ## The pipeline
 
@@ -43,10 +43,10 @@ different processes.
    idempotency key from the workflow id + step + payload, and **parks on a durable
    approval gate** (`wait_condition` on an approval/deny signal). This wait
    survives worker restarts and deploys for days.
-7. **Approve.** The approval service — the only holder of the signing secret and
-   the EXECUTE key — loads the prepared action from workflow state (server-side
-   truth, never the client), issues an HMAC `ApprovalToken` **bound to the exact
-   amount**, and signals the workflow.
+7. **Approve.** The approval service — the only issuer of approval tokens,
+   holding the signing secret and no LLM surface — loads the prepared action from
+   workflow state (server-side truth, never the client), issues an HMAC
+   `ApprovalToken` **bound to the exact amount**, and signals the workflow.
 8. **Execute (exactly-once).** The workflow schedules `execute_refund` **on the
    execute task queue**. That activity re-verifies the token against the decision
    and the prepared action (`authorize_execution`), then calls Stripe with the
@@ -86,7 +86,7 @@ different processes.
 |---|---|
 | LLM mis-extracts action | Human sees full preview before approval; deny routes back |
 | Injection tries to set an amount | Type has no amount field; engine ignores text |
-| Execute activity times out / retries | Same idempotency key → Stripe dedups → exactly-once |
+| Execute activity times out / retries | Same idempotency key → durable reservation + Stripe dedup → exactly-once |
 | Approval refused mid-execute | `non_retryable` ApplicationError; the ticket is dead-lettered (see below), not retried into success |
 | Execution fails terminally (guard refusal or exhausted retries) | Recorded to the dead-letter queue (`dead_letter`) for human resolution; the workflow completes as `dead_lettered` instead of crashing. Money did not move. |
 | Money moved off-ledger | Nightly reconciliation flags unmatched Stripe refund as incident |

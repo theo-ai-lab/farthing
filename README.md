@@ -16,8 +16,8 @@ safe enough to move money.
 The money-safety invariant is provable in about a second, with **zero installs**:
 
 ```bash
-git clone <this repo> && cd farthing
-make verify          # 78 tests + the 152-case adversarial gate, pure stdlib
+git clone https://github.com/theo-ai-lab/farthing.git && cd farthing
+make verify          # 83 tests incl. the 152-case adversarial gate, pure stdlib
 ```
 
 You'll see the gate block \$385,021.39 of out-of-policy refund demands with \$0

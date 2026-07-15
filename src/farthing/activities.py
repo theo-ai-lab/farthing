@@ -4,8 +4,8 @@ Two groups, registered on two different workers so the credential split is
 enforced by infrastructure, not convention:
 
 * Agent-side (task queue ``farthing-agent``): ``extract``, ``fetch_facts``,
-  ``draft_reply``, ``compensate``. Holds the PREPARE Stripe key + the Anthropic
-  key. Cannot move money.
+  ``draft_reply``. Holds the PREPARE Stripe key + the Anthropic key. Cannot
+  move money.
 * Execute-side (task queue ``farthing-execute``): ``execute_refund``. Holds the
   EXECUTE Stripe key + the approval signing secret. Runs only after a human
   approves, and only where the execute key lives.
@@ -102,13 +102,6 @@ async def draft_reply(disposition: str, amount_minor: int, currency: str, contex
         disposition=disposition, amount_minor=amount_minor,
         currency=currency, customer_context=context,
     )
-
-
-@activity.defn
-async def compensate(refund_id: str, reason: str) -> None:
-    # A refund is not reversible via API; compensation records the failure,
-    # opens an incident, and flags the ledger entry for human resolution.
-    activity.logger.error("compensation for refund %s: %s", refund_id, reason)
 
 
 @activity.defn

@@ -16,7 +16,7 @@ refund run without a signed approval, stop.
   Edge adapters (`activities`, `workflows`, `worker`, `stripe_client`, `approval/`,
   `pg_ledger`, `dead_letter`, `idempotency_store`, `reconcile`, `observability`)
   wrap Temporal / Stripe / FastAPI / Postgres.
-- `tests/` — 82 tests. The zero-dep core (incl. 4000-ticket fuzz + 152-case
+- `tests/` — 83 tests. The zero-dep core (incl. 4000-ticket fuzz + 152-case
   adversarial golden set) runs with **no install**; edge tests skip offline.
 - `docs/` — `ARCHITECTURE.md`, `RUNBOOK.md`, `MEASUREMENT.md`, `DEFENSE.md`,
   `decisions/ADR-001-money-safety-architecture.md`.
@@ -85,6 +85,6 @@ the gate did not hold.
 
 - New behavior gets a test first; watch it fail, then pass.
 - Never introduce a float on the money path (`check_no_float_money.py` gates it).
-- Commit messages are domain-only: no tooling/vendor names, no authorship or
-  co-author provenance trailers (a local hook rejects them). Scan staged files first.
+- Commit messages describe the change to the system, in plain engineering
+  language. Scan staged files before committing.
 - Do not push to a remote or deploy without explicit human authorization.

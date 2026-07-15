@@ -2,7 +2,8 @@
 
 Implements the :class:`~farthing.execution_guard.IdempotencyStore` protocol with a
 transactional ``INSERT ... ON CONFLICT DO NOTHING``: the first caller to reserve a
-key gets ``True`` and a committed row; every subsequent caller gets ``False``.
+key gets ``True`` and the reservation row (committed together with the caller's
+transaction); every subsequent caller gets ``False``.
 This is what makes ``authorize_execution`` exactly-once across processes and
 restarts — an in-memory set cannot, because it is neither shared nor durable.
 

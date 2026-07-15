@@ -113,8 +113,9 @@ def verify_chain(
     truncation (dropping the last N entries leaves a valid shorter chain) or a
     wholesale rebuild by anyone with write access. To catch those, pass the
     authoritative ``expected_head_hash`` and ``expected_count`` recorded
-    out-of-band (e.g. a periodically signed/published head). Production also signs
-    each entry, or the head, with a key the ledger writer does not hold."""
+    out-of-band (e.g. a periodically signed/published head). A production
+    deployment should additionally sign each entry, or the head, with a key the
+    ledger writer does not hold."""
     prev = GENESIS_HASH
     for i, e in enumerate(entries):
         if e.seq != i:

@@ -54,8 +54,9 @@ class ExtractedRequest:
 
     Deliberately carries NO amount and NO eligibility verdict. ``raw_text`` is
     retained for the audit trail and for the human reviewer, but the policy engine
-    never reads it to decide money. ``reason_code`` is a bounded enum-like hint,
-    not free text.
+    never reads it to decide money. ``reason_code`` is an advisory hint for the
+    reviewer and the audit trail; the policy engine never reads it either — every
+    decision is computed from ``AccountFacts`` alone.
     """
 
     action_type: ActionType

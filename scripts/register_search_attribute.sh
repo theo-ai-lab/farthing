@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Register the custom search attribute the approval inbox filters on to list the
 # workflows parked at the approval gate. One-time per Temporal namespace; safe to
-# re-run (an "already exists" error is ignored).
+# re-run (a create that fails because it already exists is treated as success —
+# note this also tolerates a server being down, so confirm the attribute if the
+# inbox later shows nothing parked).
 #
 #   ./scripts/register_search_attribute.sh
 #
