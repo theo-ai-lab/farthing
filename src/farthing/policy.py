@@ -138,7 +138,7 @@ def decide(req: ExtractedRequest, facts: AccountFacts) -> PolicyDecision:
     """Pure, deterministic policy decision. Same inputs → same output, always."""
     if not facts.facts_are_coherent():
         return PolicyDecision(
-            Disposition.ESCALATE, 0, facts.currency or "XXX",
+            Disposition.ESCALATE, 0, facts.currency or "XXX",  # ISO 4217 "no currency"
             ("incoherent_facts",), POLICY_VERSION,
         )
 

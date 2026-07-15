@@ -77,8 +77,8 @@ class TestExecutionGuard(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "replay")
 
     def test_check_and_set_is_atomic_second_call_refused(self) -> None:
-        # The real fix: a single store, two authorizations of the same token —
-        # the first reserves and succeeds, the second is refused.
+        # A single store, two authorizations of the same token — the first
+        # reserves and succeeds, the second is refused.
         decision, prepared = _eligible()
         store = InMemoryIdempotencyStore()
         tok = _token(prepared)

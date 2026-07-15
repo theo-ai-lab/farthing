@@ -75,11 +75,14 @@ def _random_facts(rng: random.Random) -> AccountFacts:
 
 
 def _ceiling_minor(f: AccountFacts) -> int:
+    # Mirrors the CUMULATIVE cap: prior refunds count against the percentage
+    # ceiling too, exactly as in policy._refund_ceiling.
     from farthing.money import Money, pct_of
 
     paid = Money(f.amount_paid_minor, f.currency)
-    remaining = paid.sub_clamped(Money(f.prior_refunds_minor, f.currency))
-    cap = pct_of(paid, f.plan_max_refund_pct)
+    already = Money(f.prior_refunds_minor, f.currency)
+    remaining = paid.sub_clamped(already)
+    cap = pct_of(paid, f.plan_max_refund_pct).sub_clamped(already)
     return remaining.min(cap).minor_units
 
 

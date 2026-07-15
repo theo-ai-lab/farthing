@@ -7,9 +7,8 @@ extraction output deliberately has no amount field, so even a fully
 prompt-injected model cannot hand a dollar figure downstream — the type system
 forbids it.
 
-Model routing follows the spec: Claude Sonnet 5 for routine extraction, escalate
-to Claude Opus 4.8 when the first pass is low-confidence or the request is
-ambiguous.
+Model routing: Claude Sonnet 5 for routine extraction, escalating to Claude
+Opus 4.8 when the first pass is low-confidence or the request is ambiguous.
 """
 
 from __future__ import annotations

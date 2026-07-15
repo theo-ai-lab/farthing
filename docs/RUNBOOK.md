@@ -20,7 +20,7 @@ account, and an Anthropic API key.
 
 ```bash
 # 1. Install
-uv sync
+uv sync --all-extras
 prek install    # git hooks: ruff + no-float-money + invariant suite on every commit
 
 # 2. Infra: Temporal + Postgres (+ temporal-ui)
@@ -28,7 +28,7 @@ docker compose up -d
 
 # 2b. Register the custom search attribute the approval inbox filters on to list
 #     the workflows parked at the gate. One-time per namespace.
-temporal operator search-attribute create --name farthing_state --type Keyword
+./scripts/register_search_attribute.sh
 
 # 3. Config
 cp .env.example .env    # fill in the two Stripe restricted keys + Anthropic key
@@ -39,8 +39,14 @@ cp .env.example .env    # fill in the two Stripe restricted keys + Anthropic key
 uv run farthing-worker --role agent      # PREPARE key + LLM
 uv run farthing-worker --role execute    # EXECUTE key + signing secret
 
-# 5. Approval inbox
-uv run farthing-inbox                    # http://127.0.0.1:8080/inbox
+# 5. Approval inbox (fails closed: the raw :8080 endpoint returns 401 to any
+#    request without a proxy-asserted reviewer identity — a browser can't send it)
+uv run farthing-inbox
+
+# 5b. Dev auth proxy — injects the reviewer identity so the inbox is clickable
+#     in a browser. Local demos only; in production a real auth proxy does this.
+FARTHING_APPROVAL_PROXY_SHARED_SECRET=<same value as .env> \
+  uv run python scripts/dev_inbox_proxy.py    # http://127.0.0.1:8090/inbox
 ```
 
 ## Create Stripe restricted keys
@@ -57,10 +63,10 @@ The whole point is that the agent worker's key cannot create a refund.
 
 ## Run a ticket end-to-end
 
-Start a workflow (see `examples/run_ticket.py`), open the inbox, review the full
-previewed amount, click Approve, and watch the refund execute exactly once. Try a
-hostile ticket (demand more than the plan allows) and watch it get denied or
-escalated with \$0 moved.
+Start a workflow (see `examples/run_ticket.py`), open the inbox through the dev
+proxy at `http://127.0.0.1:8090/inbox`, review the full previewed amount, click
+Approve, and watch the refund execute exactly once. Try a hostile ticket (demand
+more than the plan allows) and watch it get denied or escalated with \$0 moved.
 
 ## Nightly reconciliation
 

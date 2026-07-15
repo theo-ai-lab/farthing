@@ -74,7 +74,6 @@ async def _run_agent() -> None:
             activities.extract,
             activities.fetch_facts,
             activities.draft_reply,
-            activities.compensate,
             activities.reconcile_window,
         ],
     ):

@@ -4,7 +4,13 @@ import unittest
 from decimal import Decimal
 
 from _factories import facts, refund_request
-from farthing.domain import ActionType, Disposition, ExtractedRequest, SubscriptionStatus
+from farthing.domain import (
+    AccountFacts,
+    ActionType,
+    Disposition,
+    ExtractedRequest,
+    SubscriptionStatus,
+)
 from farthing.policy import POLICY_VERSION, decide
 
 
@@ -85,9 +91,6 @@ class TestRefundPolicy(unittest.TestCase):
 
     def test_nonfinite_usage_escalates_not_crashes(self) -> None:
         # A malformed billing field (NaN/inf) must escalate, never raise or pay.
-
-        from farthing.domain import AccountFacts, SubscriptionStatus
-
         bad = AccountFacts(
             subscription_id="s", invoice_id="i", currency="USD",
             amount_paid_minor=5000, prior_refunds_minor=0,

@@ -200,7 +200,7 @@ async def deny(ticket_id: str, csrf: str = Form(...),
     return RedirectResponse("/inbox", status_code=303)
 
 
-# --- Seams the demo wiring fills in ---
+# --- Server-side workflow state: the only source of prepared actions ---
 
 def _workflow_id(ticket_id: str) -> str:
     return f"farthing-ticket-{ticket_id}"
