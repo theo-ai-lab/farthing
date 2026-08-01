@@ -23,7 +23,8 @@ The money-safety invariant is provable in about a second, with **zero installs**
 
 ```bash
 git clone https://github.com/theo-ai-lab/farthing.git && cd farthing
-make verify          # 101 tests incl. the 152-case adversarial gate, pure stdlib
+make verify          # 116 tests incl. the 152-case adversarial gate and the
+                     # kill-at-every-boundary crash matrix, pure stdlib
 ```
 
 You'll see the gate block \$385,021.39 of out-of-policy refund demands with \$0

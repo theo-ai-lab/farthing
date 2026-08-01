@@ -10,7 +10,7 @@ help:  ## Show this help
 .DEFAULT_GOAL := help
 
 # The zero-dependency invariant proof. Runs anywhere Python 3.13+ exists.
-verify:  ## Prove the money invariant (101 tests, zero installs)
+verify:  ## Prove the money invariant (116 tests, zero installs)
 	PYTHONPATH=src:tests python3 -m unittest discover -s tests -p 'test_*.py' -v
 	python3 scripts/check_no_float_money.py
 

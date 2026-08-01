@@ -38,7 +38,22 @@ so a retry re-uses the key instead of minting a new one; a durable reserve
 (`INSERT ... ON CONFLICT DO NOTHING`) that returns true exactly once per key; and
 Stripe's own idempotency key so even a retry it never learned about collapses into
 the original refund. A crash between Stripe success and our commit resolves the
-existing refund by metadata key rather than creating a second one.
+existing refund by metadata key rather than creating a second one — and that last
+part is why the guarantee does not expire with Stripe's 24-hour window.
+
+**"How do you know that, rather than believe it?"**
+`tests/test_crash_matrix.py` kills the process at every durability boundary in the
+settlement sequence — first attempt and again during recovery, provider dedup
+window open and closed — and asserts after every attempt that at most one refund
+exists, the chain verifies, and money never moved without a committed audit row.
+The boundaries are read out of the source with `ast` rather than hand-listed, so
+the matrix cannot fall behind the code. Building it surfaced a real hole: because
+the key is scoped to the ticket, a re-driven ticket reached the replay path with a
+different action against the same reservation, and the old code either reported a
+success for money it never moved or created a second refund with no audit row.
+The replay path now checks the reservation's committed audit row and refuses on a
+mismatch. It is offline, though — killing a container mid-refund against live
+Stripe is a drill I have not run.
 
 **"Why is the reservation the LAST check in the guard?"**
 So a refused authorization never consumes a key. `authorize_execution` verifies
