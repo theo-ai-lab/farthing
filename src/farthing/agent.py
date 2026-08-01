@@ -18,6 +18,7 @@ from pydantic_ai import Agent
 
 from .domain import ActionType, ExtractedRequest
 from .money import format_money
+from .reply_guard import checked_reply
 
 
 class ExtractionOutput(BaseModel):
@@ -90,7 +91,13 @@ async def draft_reply(
     model: str = "anthropic:claude-sonnet-5",
 ) -> str:
     """Draft the customer reply from the decided disposition. The amount is passed
-    in from the engine's decision — the model never chooses it."""
+    in from the engine's decision — the model never chooses it.
+
+    ``customer_context`` is untrusted ticket text, so the draft is post-checked
+    deterministically before it can reach a customer: the prompt above is an
+    instruction, not a guarantee, and a ticket that talks the model into promising
+    a figure the engine never decided must not be sendable. A rejected draft
+    degrades to the template rather than to a wrong number."""
     agent: Agent[None, str] = Agent(model, output_type=str, system_prompt=_REPLY_SYSTEM)
     # Single currency-correct money-formatting path (same as the approval preview).
     amount_str = format_money(amount_minor, currency) if amount_minor else "n/a"
@@ -100,4 +107,6 @@ async def draft_reply(
         f"Context: {customer_context}\n"
         "Write the reply."
     )
-    return (await agent.run(prompt)).output
+    draft = (await agent.run(prompt)).output
+    return checked_reply(draft, disposition=disposition,
+                         amount_minor=amount_minor, currency=currency)

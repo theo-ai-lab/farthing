@@ -22,6 +22,7 @@ CORE = [
     "idempotency.py",
     "execution_guard.py",
     "reconcile.py",
+    "reply_guard.py",
 ]
 ROOT = Path(__file__).resolve().parent.parent / "src" / "farthing"
 

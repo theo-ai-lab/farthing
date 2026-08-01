@@ -23,7 +23,7 @@ The money-safety invariant is provable in about a second, with **zero installs**
 
 ```bash
 git clone https://github.com/theo-ai-lab/farthing.git && cd farthing
-make verify          # 85 tests incl. the 152-case adversarial gate, pure stdlib
+make verify          # 99 tests incl. the 152-case adversarial gate, pure stdlib
 ```
 
 You'll see the gate block \$385,021.39 of out-of-policy refund demands with \$0
@@ -52,6 +52,11 @@ even against a fully prompt-injected model:
   previewed amount and charge**, a **deterministic idempotency key** (workflow id
   + step + ticket), and a **PREPARE/EXECUTE credential split** — the agent worker
   literally does not hold a Stripe key that can move money.
+- The one model output a customer actually reads — the reply — is **post-checked
+  deterministically** before it is sent. The drafter is handed exactly one figure,
+  the decided amount, so any other money figure in its draft came from the ticket
+  text, not the engine; such a draft is refused in favour of a plain template.
+  A ticket cannot talk the agent into promising money.
 
 ## The wow moment
 
@@ -111,9 +116,9 @@ the agent worker (PREPARE key); `execute_refund` runs only on the execute worker
 ## The money-critical core is dependency-free
 
 Everything that decides or moves a dollar — `money`, `domain`, `policy`,
-`ledger`, `idempotency`, `execution_guard`, `reconcile` — is **pure standard
-library** and is tested with **zero dependencies**. You can verify the invariant
-without Temporal, Stripe, an LLM, or a network:
+`ledger`, `idempotency`, `execution_guard`, `reconcile`, `reply_guard` — is
+**pure standard library** and is tested with **zero dependencies**. You can verify
+the invariant without Temporal, Stripe, an LLM, or a network:
 
 ```bash
 PYTHONPATH=src:tests python3 -m unittest discover -s tests -p 'test_*.py'
