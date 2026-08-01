@@ -34,7 +34,7 @@ from .domain import (
     RefundResult,
     SubscriptionStatus,
 )
-from .execution_guard import ApprovalToken, authorize_execution
+from .execution_guard import ApprovalToken
 
 if TYPE_CHECKING:
     from .db import DBConn
@@ -153,14 +153,12 @@ async def execute_refund(
 ) -> RefundResult:
     """The only activity that moves money.
 
-    Ordering is the exactly-once boundary: the durable key reservation is
-    committed BEFORE Stripe is called and is never rolled back on a Stripe
-    failure. A retry therefore sees the key already reserved and resolves the
-    existing refund by metadata key rather than creating a second one — so a crash
-    between Stripe success and our commit cannot double-refund, even beyond
-    Stripe's idempotency window."""
-    from .stripe_client import ExecuteClient
-
+    This is wiring, not logic: it binds the real settings, database and Stripe
+    client to :func:`farthing.settlement.settle_refund`, which owns the ordering
+    that makes execution exactly-once (reservation + audit row committed together,
+    BEFORE Stripe, never rolled back on a Stripe failure). That sequence is killed
+    at every one of its boundaries in ``tests/test_crash_matrix.py``; keeping it
+    out of this activity is what makes that possible."""
     s = approval_settings()
     token = ApprovalToken(**token_d)
     decision = PolicyDecision(
@@ -186,11 +184,11 @@ async def execute_refund(
 
     import psycopg
 
-    from . import pg_ledger
     from .execution_guard import ExecutionRefused
     from .idempotency_store import PostgresIdempotencyStore
     from .observability import current_trace_id
-    from .stripe_client import STRIPE_API_VERSION
+    from .settlement import settle_refund
+    from .stripe_client import STRIPE_API_VERSION, ExecuteClient
 
     client = ExecuteClient(s.stripe_execute_key.get_secret_value())
 
@@ -198,56 +196,17 @@ async def execute_refund(
         store = PostgresIdempotencyStore(conn)
         _ensure_schema_once(store, conn)
         try:
-            instr = authorize_execution(
+            return settle_refund(
                 s.approval_signing_secret.get_secret_value().encode(),
                 token=token, decision=decision, prepared=prepared,
-                store=store, now_ts=int(time.time()),
+                conn=conn, store=store, gateway=client,
+                now_ts=int(time.time()), trace_id=current_trace_id(),
+                api_version=STRIPE_API_VERSION,
             )
         except ExecutionRefused as e:
-            if e.code == "replay":
-                # Already reserved by a prior attempt. Resolve idempotently:
-                # return the existing refund on the SIGNED charge, or re-drive
-                # Stripe with the same key (Stripe dedups). token.charge_id is the
-                # signed target — never the unsigned activity argument. The guard
-                # only reaches "replay" after the unbound_charge check passed, so
-                # the charge is bound; assert it to make that guarantee typed.
-                if token.charge_id is None:
-                    raise ApplicationError("replayed refund token has no bound charge", non_retryable=True) from e
-                existing = client.find_refund_by_key(
-                    charge_id=token.charge_id, idempotency_key=token.idempotency_key
-                )
-                if existing is not None:
-                    return existing
-                return client.create_refund(
-                    charge_id=token.charge_id, amount_minor=token.amount_minor,
-                    idempotency_key=token.idempotency_key,
-                )
+            # Every refusal is terminal: retrying a bad signature, a stale token or
+            # a drifted amount can only fail again. Money did not move.
             raise ApplicationError(f"execution refused: {e.code}", non_retryable=True) from e
-
-        # Reservation + hash-chained ledger entry are written and committed in ONE
-        # transaction BEFORE Stripe, and never rolled back on a Stripe failure, so
-        # money can never move without a durable audit row. The deliberate cost of
-        # audit-before-money ordering: a permanent Stripe failure leaves an audit
-        # row with no refund — the safe direction, caught by reconcile.py as
-        # unmatched_in_ledger and raised as an incident.
-        pg_ledger.append_executed_refund(
-            conn, timestamp=int(time.time()), ticket_id=instr.ticket_id,
-            amount_minor=instr.amount_minor, currency=instr.currency,
-            charge_id=instr.charge_id, approver=instr.approver,
-            idempotency_key=instr.idempotency_key, otel_trace_id=current_trace_id(),
-            policy_version=decision.policy_version, api_version=STRIPE_API_VERSION,
-        )
-        conn.commit()
-
-    # authorize_execution refuses a refund with no bound charge (unbound_charge),
-    # so instr.charge_id is guaranteed set here; assert it to keep that typed.
-    if instr.charge_id is None:
-        raise ApplicationError("authorized refund has no bound charge", non_retryable=True)
-    return client.create_refund(
-        charge_id=instr.charge_id,  # the signed, bound charge — no unsigned fallback
-        amount_minor=instr.amount_minor,
-        idempotency_key=instr.idempotency_key,
-    )
 
 
 @activity.defn

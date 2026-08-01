@@ -21,6 +21,7 @@ CORE = [
     "dead_letter.py",
     "idempotency.py",
     "execution_guard.py",
+    "settlement.py",
     "reconcile.py",
     "reply_guard.py",
 ]
