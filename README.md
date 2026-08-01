@@ -23,12 +23,14 @@ The money-safety invariant is provable in about a second, with **zero installs**
 
 ```bash
 git clone https://github.com/theo-ai-lab/farthing.git && cd farthing
-make verify          # 83 tests incl. the 152-case adversarial gate, pure stdlib
+make verify          # 85 tests incl. the 152-case adversarial gate, pure stdlib
 ```
 
 You'll see the gate block \$385,021.39 of out-of-policy refund demands with \$0
-executed beyond policy. `make help` lists everything else; the full stack (live
-Stripe/Temporal) is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+executed beyond policy — and, from the same run, a **100% correct-grant rate on
+the 37 benign controls**: the honest customers get the exact amount they are
+owed. `make help` lists everything else; the full stack (live Stripe/Temporal)
+is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
 ---
 
@@ -57,6 +59,12 @@ Try to socially-engineer an over-refund and watch the policy engine block it,
 explain why, and route it to a human. On the 152-case adversarial golden set,
 every out-of-policy dollar demanded is blocked and **\$0 executes beyond policy**
 — enforced as a CI gate that fails the build on a single violation.
+
+Blocking is the easy half, and a gate that only measured blocking would be
+passed by an engine that refused everyone. So the same gate is two-sided: each
+case declares the outcome it was written to produce, and the 37 benign controls
+are graded on **correct grants, currently 37/37** — right disposition, right
+amount, to the cent. Refuse a single honest customer and the build fails.
 
 ## Architecture at a glance
 
