@@ -426,6 +426,34 @@ class TestReplayAgainstADifferentAction(CrashMatrixAssertions):
                 "a reservation spent on another amount must be refused, not resolved",
             )
 
+    def test_a_second_approval_of_the_same_action_pays_once(self) -> None:
+        """The approval-signal boundary, from the settlement side. If the approval
+        service dies between issuing a token and signalling the workflow, the
+        reviewer clicks again — and a second reviewer approving the same ticket
+        looks identical from here: a different token, differently signed, for the
+        same action. The key is derived from the ticket, so both land on the same
+        reservation and only the first one's money moves."""
+        # Both issued before the settlement clock and inside the freshness window;
+        # a token issued after it is a separate refusal (future_token).
+        first = Case(approver="alice@example.com", issued_ts=NOW_TS - 10)
+        second = Case(approver="bob@example.com", issued_ts=NOW_TS - 5)
+        self.assertEqual(second.idempotency_key, first.idempotency_key)
+        self.assertNotEqual(second.token.signature, first.token.signature)
+
+        db, stripe = FakeDatabase(), FakeStripe(idempotency_window_open=False)
+        self.assertTrue(self._settle(first, db, stripe).survived)
+        outcome = self._settle(second, db, stripe)
+
+        self.assertTrue(outcome.survived, f"the second approval was refused: {outcome.refused}")
+        self.assertEqual(len(stripe.applied), 1, "two approvals must not pay twice")
+        self.assertEqual(len(stripe.create_calls), 1, "and must not even ask twice")
+        entries = committed_entries(db)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(
+            entries[0].approver, "alice@example.com",
+            "the audit row must name the approver whose authorization actually moved the money",
+        )
+
     def test_a_reserved_key_with_no_audit_row_is_refused(self) -> None:
         """The reservation and its audit row commit together, so a reserved key
         without a row cannot happen — which is exactly why reaching it must fail

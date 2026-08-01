@@ -23,7 +23,7 @@ The money-safety invariant is provable in about a second, with **zero installs**
 
 ```bash
 git clone https://github.com/theo-ai-lab/farthing.git && cd farthing
-make verify          # 116 tests incl. the 152-case adversarial gate and the
+make verify          # 117 tests incl. the 152-case adversarial gate and the
                      # kill-at-every-boundary crash matrix, pure stdlib
 ```
 
@@ -122,9 +122,12 @@ the agent worker (PREPARE key); `execute_refund` runs only on the execute worker
 ## The money-critical core is dependency-free
 
 Everything that decides or moves a dollar — `money`, `domain`, `policy`,
-`ledger`, `idempotency`, `execution_guard`, `reconcile`, `reply_guard` — is
-**pure standard library** and is tested with **zero dependencies**. You can verify
-the invariant without Temporal, Stripe, an LLM, or a network:
+`ledger`, `idempotency`, `execution_guard`, `settlement`, `reconcile`,
+`reply_guard` — is **pure standard library** and is tested with **zero
+dependencies**. That includes the money-movement sequence itself: `settlement`
+takes its database and payment-provider edges as protocols, so the ordering that
+makes execution exactly-once can be executed — and killed at every one of its
+boundaries — without Temporal, Stripe, an LLM, or a network:
 
 ```bash
 PYTHONPATH=src:tests python3 -m unittest discover -s tests -p 'test_*.py'
