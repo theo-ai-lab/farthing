@@ -23,7 +23,7 @@ The money-safety invariant is provable in about a second, with **zero installs**
 
 ```bash
 git clone https://github.com/theo-ai-lab/farthing.git && cd farthing
-make verify          # 99 tests incl. the 152-case adversarial gate, pure stdlib
+make verify          # 101 tests incl. the 152-case adversarial gate, pure stdlib
 ```
 
 You'll see the gate block \$385,021.39 of out-of-policy refund demands with \$0
@@ -56,7 +56,12 @@ even against a fully prompt-injected model:
   deterministically** before it is sent. The drafter is handed exactly one figure,
   the decided amount, so any other money figure in its draft came from the ticket
   text, not the engine; such a draft is refused in favour of a plain template.
-  A ticket cannot talk the agent into promising money.
+  This half is a heuristic and is scoped honestly: it reads figures written in
+  digits next to a symbol, an ISO code or a currency word, on either side
+  (`$500`, `500 USD`, `USD 500`, `750€`), plus claims that contradict the
+  disposition. An amount spelled out in words on an already-approved ticket is
+  the known gap — it is caught on a denial, not on an approval. The structural
+  guarantees above, not this regex, are what make the amount itself safe.
 
 ## The wow moment
 

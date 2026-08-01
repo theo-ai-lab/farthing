@@ -143,6 +143,44 @@ class TestMoneyFiguresAreRejected(unittest.TestCase):
                             amount_minor=0, currency="USD")
         )
 
+    def test_money_position_does_not_depend_on_which_side_the_currency_sits(self) -> None:
+        """The ISO code is conventionally written BEFORE the figure. A guard that
+        reads '500 USD' but not 'USD 500' lets an inflated promise through on an
+        already-eligible ticket, where the money regex is the only check that
+        applies. Engine decided $10.00; every one of these states something else."""
+        inflated = [
+            "Your refund of USD 500.00 has been approved and sent.",
+            "Your refund of USD 500 has been approved and sent.",
+            "Your refund of usd 500 has been approved and sent.",
+            "We have credited EUR 750 to your account.",
+            "Your refund of 500 USD has been approved and sent.",
+            "Your refund of $500.00 has been approved and sent.",
+            "We have credited 750€ to your account.",
+        ]
+        for reply in inflated:
+            with self.subTest(reply=reply):
+                self.assertIsNotNone(
+                    reply_violation(reply, disposition="eligible",
+                                    amount_minor=1000, currency="USD"),
+                    "an amount the engine never decided reached the customer",
+                )
+                self.assertEqual(
+                    checked_reply(reply, disposition="eligible",
+                                  amount_minor=1000, currency="USD"),
+                    fallback_reply("eligible"),
+                )
+
+    def test_the_decided_figure_is_still_accepted_in_prefix_position(self) -> None:
+        """Two-sided: widening the regex must not make every ISO code a violation."""
+        for reply in ("Your refund of USD 10.00 is approved.",
+                      "Your refund of USD 10 is approved.",
+                      "A refund of 10.00 USD is on its way."):
+            with self.subTest(reply=reply):
+                self.assertIsNone(
+                    reply_violation(reply, disposition="eligible",
+                                    amount_minor=1000, currency="USD")
+                )
+
     def test_non_money_numbers_are_ignored(self) -> None:
         self.assertIsNone(
             reply_violation(
