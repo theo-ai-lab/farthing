@@ -34,9 +34,17 @@ CREATE TABLE IF NOT EXISTS farthing_ledger (
 );
 """
 
+# The replay path looks a reservation up by its key to prove the reservation
+# belongs to the refund in hand, so that lookup must not degrade into a scan.
+DDL_IDEMPOTENCY_KEY_INDEX = (
+    "CREATE INDEX IF NOT EXISTS farthing_ledger_idempotency_key_idx "
+    "ON farthing_ledger (idempotency_key);"
+)
+
 
 def ensure_schema(conn: DBConn) -> None:
     conn.execute(DDL)
+    conn.execute(DDL_IDEMPOTENCY_KEY_INDEX)
 
 
 def append_executed_refund(
@@ -89,6 +97,21 @@ def append_executed_refund(
 
 _COLS = ("seq,timestamp,ticket_id,action_type,disposition,amount_minor,currency,"
          "approver,idempotency_key,otel_trace_id,policy_version,charge_id,api_version,prev_hash,entry_hash")
+
+
+def find_by_idempotency_key(conn: DBConn, key: str) -> LedgerEntry | None:
+    """The committed entry a reservation belongs to, or None.
+
+    Because the reservation and this row are written in the same transaction, a
+    reserved key always has exactly one row. That makes this the authoritative
+    answer to "what was this key actually spent on" — which is what the replay
+    path needs before it can treat a taken reservation as *its own* prior
+    attempt."""
+    row = conn.execute(
+        f"SELECT {_COLS} FROM farthing_ledger WHERE idempotency_key = %s ORDER BY seq LIMIT 1",
+        (key,),
+    ).fetchone()
+    return LedgerEntry(*row) if row is not None else None
 
 
 def read_refunded_entries(conn: DBConn, *, start_ts: int, end_ts: int) -> list[LedgerEntry]:

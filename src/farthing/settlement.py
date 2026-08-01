@@ -49,6 +49,7 @@ KILL_POINTS: tuple[str, ...] = (
     "after_ledger_append",
     "after_commit",
     "after_provider_create",
+    "replay_after_record_check",
     "replay_before_lookup",
     "replay_after_lookup",
     "replay_after_create",
@@ -118,7 +119,7 @@ def settle_refund(
         # The key was already reserved by an earlier attempt, which means that
         # attempt committed its audit row. Resolve idempotently rather than
         # creating a second refund.
-        return _resolve_replay(token=token, gateway=gateway, on_step=on_step)
+        return _resolve_replay(token=token, conn=conn, gateway=gateway, on_step=on_step)
     on_step("after_reserve")
 
     # authorize_execution refuses a refund with no bound charge (unbound_charge),
@@ -147,7 +148,7 @@ def settle_refund(
 
 
 def _resolve_replay(
-    *, token: ApprovalToken, gateway: RefundGateway, on_step: StepObserver
+    *, token: ApprovalToken, conn: DBConn, gateway: RefundGateway, on_step: StepObserver
 ) -> RefundResult:
     """Resolve an already-reserved key without moving more money.
 
@@ -155,15 +156,53 @@ def _resolve_replay(
     otherwise re-drive the provider with the SAME key, which is the case where the
     reserving attempt died between its commit and the provider call. The charge is
     always ``token.charge_id`` — the signed target, never an unsigned argument.
+
+    A taken reservation only means "this refund already happened" if the key
+    identifies the refund. It does not: the approval service derives it from the
+    ticket, so a later run of the same ticket — a re-opened ticket, a second
+    billing period — arrives here holding a *different* action against the *same*
+    reservation. The committed audit row is the reservation's own record of what
+    it was spent on, so it is checked first, and a mismatch is refused rather than
+    resolved. Without that check the two ways this goes wrong are: returning the
+    older refund as if it satisfied this action (a success report for money that
+    never moved), and finding nothing on the new charge and creating a refund that
+    holds no reservation and leaves no audit row.
     """
     if token.charge_id is None:  # pragma: no cover - guarded upstream
         raise ExecutionRefused("unbound_charge", "replayed refund token has no bound charge")
+
+    recorded = pg_ledger.find_by_idempotency_key(conn, token.idempotency_key)
+    if recorded is None:
+        # Reservation and audit row commit in one transaction, so this state is
+        # unreachable. Reaching it means that ordering has been broken somewhere;
+        # refusing is the only safe response, because the alternative is paying
+        # against a reservation nothing can account for.
+        raise ExecutionRefused(
+            "replay_without_record", "reserved key has no committed audit row"
+        )
+    if (
+        recorded.charge_id != token.charge_id
+        or recorded.amount_minor != token.amount_minor
+        or recorded.currency.upper() != token.currency.upper()
+    ):
+        raise ExecutionRefused(
+            "replay_action_drift", "the reserved key was spent on a different action"
+        )
+    on_step("replay_after_record_check")
+
     on_step("replay_before_lookup")
     existing = gateway.find_refund_by_key(
         charge_id=token.charge_id, idempotency_key=token.idempotency_key
     )
     on_step("replay_after_lookup")
     if existing is not None:
+        if (
+            existing["amount"] != token.amount_minor
+            or existing["currency"].upper() != token.currency.upper()
+        ):
+            raise ExecutionRefused(
+                "replay_refund_drift", "the provider's refund for this key is not this action"
+            )
         return existing
     created = gateway.create_refund(
         charge_id=token.charge_id, amount_minor=token.amount_minor,

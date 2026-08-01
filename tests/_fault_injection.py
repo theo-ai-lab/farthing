@@ -94,7 +94,7 @@ class FakeConn:
 
     def execute(self, query: Any, params: Any = None, /) -> _Result:
         sql = " ".join(str(query).split())
-        if sql.startswith("CREATE TABLE"):
+        if sql.startswith("CREATE "):
             return _Result([])
         if sql.startswith("INSERT INTO farthing_idempotency"):
             key = str(params[0])
@@ -111,6 +111,10 @@ class FakeConn:
         if sql.startswith("INSERT INTO farthing_ledger"):
             self._pending_rows.append(tuple(params))
             return _Result([], rowcount=1)
+        if sql.startswith("SELECT") and "WHERE idempotency_key = %s" in sql:
+            key = str(params[0])
+            sel = [r for r in self._visible_rows() if r[8] == key]
+            return _Result(sorted(sel, key=lambda r: int(r[0]))[:1])
         if sql.startswith("SELECT") and "disposition = 'refunded'" in sql:
             start, end = params
             sel = [r for r in self._visible_rows() if r[4] == "refunded" and start <= r[1] <= end]
@@ -152,6 +156,11 @@ class FakeStripe:
         """The next create applies at the provider and then the process dies
         before the response is ever observed — the classic in-flight death."""
         self._die_on_next_create = True
+
+    def disarm_death(self) -> bool:
+        """Clear an armed death that never fired. Returns whether one was pending."""
+        pending, self._die_on_next_create = self._die_on_next_create, False
+        return pending
 
     # -- RefundGateway surface (structurally identical to ExecuteClient) --------
     def create_refund(self, *, charge_id: str, amount_minor: int, idempotency_key: str) -> RefundResult:
