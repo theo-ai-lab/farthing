@@ -25,11 +25,14 @@ with workflow.unsafe.imports_passed_through():
     from .activities import facts_from_dict, request_from_dict
     from .domain import Disposition, PreparedAction
     from .policy import decide
+    from .preconditions import REQUIRED_SEARCH_ATTRIBUTE
     from .reply_guard import DecidedOutcome, Outcome, fallback_reply
 
 # Custom search attribute the approval inbox filters on to list parked workflows.
-# Register it once per Temporal namespace (see docs/RUNBOOK.md).
-FARTHING_STATE = SearchAttributeKey.for_keyword("farthing_state")
+# Register it once per Temporal namespace (see docs/RUNBOOK.md). The name comes
+# from farthing.preconditions so the attribute this upserts and the one the
+# registration script creates cannot drift apart into a silent empty inbox.
+FARTHING_STATE = SearchAttributeKey.for_keyword(REQUIRED_SEARCH_ATTRIBUTE)
 
 
 @dataclass

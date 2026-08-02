@@ -23,7 +23,7 @@ The money-safety invariant is provable in about a second, with **zero installs**
 
 ```bash
 git clone https://github.com/theo-ai-lab/farthing.git && cd farthing
-make verify          # 132 tests incl. the 152-case adversarial gate and the
+make verify          # 137 tests incl. the 152-case adversarial gate and the
                      # kill-at-every-boundary crash matrix, pure stdlib
 ```
 
