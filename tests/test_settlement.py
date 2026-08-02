@@ -103,7 +103,7 @@ class TestSettlementSequence(unittest.TestCase):
         """The ordering the whole recovery argument depends on. If the provider is
         reached before the commit, a crash in between moves money with no audit
         row — the one failure this system may never have."""
-        case, db, stripe = Case(), FakeDatabase(), FakeStripe()
+        case, db = Case(), FakeDatabase()
         seen_at_create: list[int] = []
 
         class _Watching(FakeStripe):
@@ -114,7 +114,6 @@ class TestSettlementSequence(unittest.TestCase):
         watcher = _Watching()
         _settle(case, db, watcher)
         self.assertEqual(seen_at_create, [1], "audit row must be committed before the refund call")
-        del stripe
 
 
 if __name__ == "__main__":

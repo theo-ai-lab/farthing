@@ -53,8 +53,8 @@ from ..workflows import Approval
 # `/openapi.json`, `/docs` and `/redoc` carry no such dependency, so leaving them
 # on would hand a direct-reaching, unauthenticated caller the full map of the
 # approve/deny surface — route templates, form fields and docstrings —
-# contradicting that contract. An unauthenticated external probe of the live
-# surface on 2026-08-02 retrieved all three with no credential.
+# contradicting that contract. Left enabled, all three answer an unauthenticated
+# request against a running instance; disabled, they 404.
 app = FastAPI(title="Farthing Approval Inbox", docs_url=None, redoc_url=None, openapi_url=None)
 
 

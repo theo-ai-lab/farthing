@@ -1,12 +1,13 @@
 """A precondition that is not met must say so, at the point it is not met.
 
-Two live-only failures motivated this, both observed on 2026-08-02 against a real
-``temporal server start-dev``:
+Two failures that surface only against a real ``temporal server start-dev``
+motivated this, and both are locked here:
 
-1. ``scripts/register_search_attribute.sh`` ends every run with "Done. The inbox
-   can now list workflows ...". Its ``|| echo`` swallows EVERY failure, including
-   an unreachable server, so it prints that claim after registering nothing.
-2. ``tests/test_workflow_sandbox.py`` guards the server but not the search
+1. ``scripts/register_search_attribute.sh`` used to end every run with "Done. The
+   inbox can now list workflows ...": a ``|| echo`` fallback swallowed EVERY
+   failure, including an unreachable server, so it claimed success after
+   registering nothing.
+2. ``tests/test_workflow_sandbox.py`` guarded the server but not the search
    attribute, so a server WITHOUT ``farthing_state`` produced
    ``RPCError: Unable to query workflow due to Workflow Task in failed state``
    whose actual cause (``WORKFLOW_TASK_FAILED_CAUSE_BAD_SEARCH_ATTRIBUTES``) was

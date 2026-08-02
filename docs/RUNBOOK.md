@@ -68,6 +68,21 @@ proxy at `http://127.0.0.1:8090/inbox`, review the full previewed amount, click
 Approve, and watch the refund execute exactly once. Try a hostile ticket (demand
 more than the plan allows) and watch it get denied or escalated with \$0 moved.
 
+## Attack the running gate
+
+The offline suite covers the money path; the deployment surface it cannot reach —
+the inbox's HTTP boundary — has its own probe. Run it against the live inbox:
+
+```bash
+FARTHING_APPROVAL_PROXY_SHARED_SECRET=<same value as .env> \
+  uv run python scripts/redteam_inbox.py
+```
+
+Every attack (unauthenticated read, identity-header spoof, wrong proxy secret,
+forged CSRF on the approve POST) must be blocked, and the control read must
+return 200 so a wall of 401s means "blocked", not "the inbox is down". A non-zero
+exit means the gate did not hold — investigate before demoing.
+
 ## Nightly reconciliation
 
 The reconciliation Schedule compares Stripe refunds to the ledger. If it reports

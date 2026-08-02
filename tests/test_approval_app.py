@@ -358,8 +358,8 @@ class TestNoUnauthenticatedApiSchemaDisclosure(ApprovalAppTestBase):
     `/redoc` are routes that carry no such dependency, so a direct-reaching,
     unauthenticated caller is handed the full map of the approve/deny surface —
     route templates, form fields, endpoint docstrings — which contradicts the
-    stated contract. An unauthenticated external probe of the live surface on
-    2026-08-02 retrieved all three with no credential.
+    stated contract. Left enabled, all three answer an unauthenticated request
+    against a running instance.
 
     The fix is to disable the auto-generated schema/docs on this surface, which
     makes the "every route requires auth" claim true again.
