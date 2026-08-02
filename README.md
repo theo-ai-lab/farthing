@@ -115,8 +115,11 @@ ticket ─▶ Temporal workflow
                       │  human clicks Approve in the inbox
                       ▼
                  approval service issues signed, amount-bound token
-                 execute_refund  (EXECUTE task queue only) ─▶ Stripe
                  append hash-chained ledger entry (ticket, approver, trace id)
+                 execute_refund  (EXECUTE task queue only) ─▶ Stripe
+                   └─ the ledger row commits BEFORE the provider call, so a
+                      provider failure leaves a recorded intent to reconcile;
+                      see "Known limits" in SECURITY.md
                  draft reply
             nightly: reconcile Stripe ↔ ledger  (Temporal Schedule)
 ```

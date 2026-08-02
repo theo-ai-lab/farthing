@@ -12,8 +12,8 @@ code) live here.
 | Customer message → LLM | The extraction output type has no amount/eligibility field; prompt injection cannot move money. |
 | Policy decision → money | Amounts are computed in `Decimal` from Stripe facts only; the HMAC-signed approval token binds amount, currency, charge, action, and expiry. |
 | Agent worker → Stripe | Holds only the `refund-PREPARE` key; cannot create a refund. `refund-EXECUTE` lives only in the execute worker's environment, on a separate task queue. |
-| Reviewer → approval | The approval inbox authenticates and authorizes every route (see below). |
-| Ledger integrity | Hash-chained, verifiable with `verify_chain` + out-of-band head/count anchors. |
+| Reviewer → approval | Every route requires the proxy shared secret **and** an identity the proxy asserts (see below). Authentication is delegated to the SSO proxy; the app performs **no per-reviewer authorization** — any identity the proxy vouches for may approve. A reviewer allowlist or role check is a deployment concern today, not a code control. |
+| Ledger integrity | Hash-chained and verifiable in-process with `verify_chain`, which proves the chain is **internally consistent**. It cannot detect a whole-ledger re-seal by an attacker with write access; only an out-of-band anchor can, and **no anchor writer is implemented** — see Known limits. |
 
 ## Approval inbox — the money gate (deployment requirements)
 
@@ -54,6 +54,38 @@ and HSTS. Serve over HTTPS.
   policy appropriate to your data-handling obligations, and redact where required.
 - The audit ledger stores ticket id, approver, amounts, and trace id — not the
   customer message.
+
+## Known limits
+
+These are properties the code does **not** establish today. They are listed
+because a security file that only lists strengths is marketing.
+
+- **No provider-status validation.** `stripe_client.create_refund` returns
+  Stripe's status without checking it, and `settlement` accepts any refund
+  object. Stripe can return `pending`, `requires_action`, `failed` or
+  `canceled`; today only `succeeded` is assumed. A non-succeeded refund is
+  recorded and replied to as a completed one.
+- **The ledger append precedes provider confirmation.** `append_executed_refund`
+  writes `disposition="refunded"` and commits before the Stripe call returns, so
+  a permanent provider failure leaves a `refunded` audit row for money that
+  never moved. The README architecture diagram shows the opposite ordering; the
+  diagram describes the intent, the code does not yet match it.
+- **No out-of-band ledger anchor.** `verify_chain` proves internal consistency
+  only. An attacker with write access to the ledger can rewrite a row and
+  re-derive every hash; the result verifies clean. Detecting that requires
+  publishing chain heads somewhere the attacker does not control, which is not
+  implemented.
+- **No per-reviewer authorization.** See the trust-boundary table above.
+- **Reconciliation raises no incident.** A non-clean reconciliation writes a log
+  line and returns normally. There is no persisted incident state and no pager
+  path.
+- **The crash matrix injects faults in-process.** It kills at every await
+  boundary against in-memory Postgres and Stripe fakes. It does not test process
+  death, real Postgres isolation, concurrent workers, or a lost provider
+  response.
+
+None of these affect the policy engine's amount decisions, which are pure,
+`Decimal`-only, and covered by the adversarial golden set.
 
 ## Reporting
 
