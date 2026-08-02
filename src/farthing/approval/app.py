@@ -47,7 +47,15 @@ from ..idempotency import derive_idempotency_key
 from ..money import format_money
 from ..workflows import Approval
 
-app = FastAPI(title="Farthing Approval Inbox")
+# docs_url/redoc_url/openapi_url are disabled: this is the money-moving surface,
+# whose contract is that *every* route requires an authenticated reviewer
+# identity (see the module docstring and `require_reviewer`). FastAPI's default
+# `/openapi.json`, `/docs` and `/redoc` carry no such dependency, so leaving them
+# on would hand a direct-reaching, unauthenticated caller the full map of the
+# approve/deny surface — route templates, form fields and docstrings —
+# contradicting that contract. An unauthenticated external probe of the live
+# surface on 2026-08-02 retrieved all three with no credential.
+app = FastAPI(title="Farthing Approval Inbox", docs_url=None, redoc_url=None, openapi_url=None)
 
 
 @app.middleware("http")

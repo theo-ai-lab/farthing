@@ -348,5 +348,35 @@ class TestSecurityHeaders(ApprovalAppTestBase):
         self.assertEqual(r.headers["X-Content-Type-Options"], "nosniff")
 
 
+class TestNoUnauthenticatedApiSchemaDisclosure(ApprovalAppTestBase):
+    """The money service must expose no ungated informational route.
+
+    The module contract is explicit: "every route requires an authenticated
+    reviewer identity supplied by an upstream auth proxy ... No identity → 401",
+    and `require_reviewer` exists precisely to defend the case where a client
+    "reaches the app directly". FastAPI's default `/openapi.json`, `/docs` and
+    `/redoc` are routes that carry no such dependency, so a direct-reaching,
+    unauthenticated caller is handed the full map of the approve/deny surface —
+    route templates, form fields, endpoint docstrings — which contradicts the
+    stated contract. An unauthenticated external probe of the live surface on
+    2026-08-02 retrieved all three with no credential.
+
+    The fix is to disable the auto-generated schema/docs on this surface, which
+    makes the "every route requires auth" claim true again.
+    """
+
+    def test_openapi_schema_is_not_served_unauthenticated(self) -> None:
+        r = self.client.get("/openapi.json")
+        self.assertEqual(r.status_code, 404, r.text)
+
+    def test_swagger_ui_is_not_served_unauthenticated(self) -> None:
+        r = self.client.get("/docs")
+        self.assertEqual(r.status_code, 404, r.text)
+
+    def test_redoc_is_not_served_unauthenticated(self) -> None:
+        r = self.client.get("/redoc")
+        self.assertEqual(r.status_code, 404, r.text)
+
+
 if __name__ == "__main__":
     unittest.main()
