@@ -96,12 +96,24 @@ async def fetch_facts(subscription_id: str, invoice_id: str | None, now_ts: int)
 
 @activity.defn
 async def draft_reply(disposition: str, amount_minor: int, currency: str, context: str) -> str:
-    from .agent import draft_reply as _draft
+    """Draft the reply for an already-decided outcome.
 
-    return await _draft(
-        disposition=disposition, amount_minor=amount_minor,
-        currency=currency, customer_context=context,
-    )
+    The Temporal payload is JSON, so the typed decision arrives flattened. It is
+    rebuilt HERE, at the boundary, before anything else touches it: an outcome the
+    reply guard does not know is a hard, non-retryable failure rather than an
+    unrecognised string that quietly makes the guard police the wrong direction.
+    The workflow catches the failure and sends its deterministic template, so the
+    failure direction stays blunt-reply, never wrong-reply."""
+    from .agent import draft_reply as _draft
+    from .reply_guard import DecidedOutcome
+
+    try:
+        outcome = DecidedOutcome.from_wire(disposition, amount_minor, currency)
+    except ValueError as e:
+        raise ApplicationError(
+            f"reply outcome the guard cannot police: {disposition!r} ({e})", non_retryable=True
+        ) from e
+    return await _draft(outcome=outcome, customer_context=context)
 
 
 @activity.defn

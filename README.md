@@ -23,7 +23,7 @@ The money-safety invariant is provable in about a second, with **zero installs**
 
 ```bash
 git clone https://github.com/theo-ai-lab/farthing.git && cd farthing
-make verify          # 117 tests incl. the 152-case adversarial gate and the
+make verify          # 132 tests incl. the 152-case adversarial gate and the
                      # kill-at-every-boundary crash matrix, pure stdlib
 ```
 
@@ -59,10 +59,14 @@ even against a fully prompt-injected model:
   text, not the engine; such a draft is refused in favour of a plain template.
   This half is a heuristic and is scoped honestly: it reads figures written in
   digits next to a symbol, an ISO code or a currency word, on either side
-  (`$500`, `500 USD`, `USD 500`, `750€`), plus claims that contradict the
-  disposition. An amount spelled out in words on an already-approved ticket is
-  the known gap — it is caught on a denial, not on an approval. The structural
-  guarantees above, not this regex, are what make the amount itself safe.
+  (`$500`, `500 USD`, `USD 500`, `750€`), plus claims that contradict the decided
+  outcome — a grant claimed when nothing was granted, **and a refusal claimed
+  after money has already moved**. The outcome is a closed, typed vocabulary, so
+  the guard checks that direction on every branch the workflow can take rather
+  than on the one branch it happens to recognise. An amount spelled out in words
+  on an already-approved ticket is the known gap — it is caught on a denial, not
+  on an approval. The structural guarantees above, not this regex, are what make
+  the amount itself safe.
 
 ## The wow moment
 
