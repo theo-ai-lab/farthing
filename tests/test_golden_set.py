@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from collections import defaultdict
 from decimal import Decimal
 from pathlib import Path
 
@@ -37,7 +38,7 @@ from farthing.domain import (
     ExtractedRequest,
     SubscriptionStatus,
 )
-from farthing.money import Money, pct_of
+from farthing.money import Money, format_money, pct_of
 from farthing.policy import decide
 
 DAY = 86_400
@@ -95,8 +96,15 @@ class TestAdversarialGoldenSet(unittest.TestCase):
 
     def test_every_case_is_safe(self) -> None:
         attacks = 0
-        demanded_out_of_policy = 0
-        executed_beyond_policy = 0
+        # Per-currency, never a single scalar. The set spans 12 currencies with
+        # three different minor-unit exponents (JPY/KRW/VND are zero-decimal,
+        # BHD/KWD are three-decimal), so adding their minor units into one
+        # accumulator and dividing by 100 produces a number with no unit --
+        # 25,000,000 VND would read as "$250,000.00". money.format_money exists
+        # precisely to stop that, and this reporter must use it too.
+        demanded_out_of_policy: dict[str, int] = defaultdict(int)
+        executed_beyond_policy: dict[str, int] = defaultdict(int)
+        benign_granted: dict[str, int] = defaultdict(int)
         eligible = 0
         # Two-sided accounting: the misses are collected rather than asserted
         # case-by-case so the printed rate is a real measurement of the whole
@@ -104,7 +112,6 @@ class TestAdversarialGoldenSet(unittest.TestCase):
         misses: list[str] = []
         benign_specified = 0
         benign_correct = 0
-        benign_granted_minor = 0
 
         for c in self.cases:
             facts = _facts(c["facts"])
@@ -155,7 +162,7 @@ class TestAdversarialGoldenSet(unittest.TestCase):
                 benign_specified += 1
                 if hit:
                     benign_correct += 1
-                    benign_granted_minor += d.amount_minor
+                    benign_granted[d.currency] += d.amount_minor
 
             if c.get("is_attack") and int(c.get("attacker_demanded_minor", 0)) > 0:
                 attacks += 1
@@ -164,23 +171,40 @@ class TestAdversarialGoldenSet(unittest.TestCase):
                 # 5. attacker never extracts more than the ceiling
                 self.assertLessEqual(d.amount_minor, ceiling, f"{cid}: attack beat ceiling")
                 if demand > ceiling:
-                    demanded_out_of_policy += demand - ceiling
-                    executed_beyond_policy += max(d.amount_minor - ceiling, 0)
+                    ccy = facts.currency
+                    demanded_out_of_policy[ccy] += demand - ceiling
+                    executed_beyond_policy[ccy] += max(d.amount_minor - ceiling, 0)
                     self.assertLess(d.amount_minor, demand, f"{cid}: honored an over-refund demand")
-
-        blocked = demanded_out_of_policy - executed_beyond_policy
         grant_rate = benign_correct / benign_specified if benign_specified else 0.0
-        print(
+        ccys = sorted(set(demanded_out_of_policy) | set(benign_granted))
+        lines = [
             f"\n[golden] {len(self.cases)} cases | {attacks} attacks | "
-            f"{eligible} eligible (correctly grantable) | "
-            f"${demanded_out_of_policy/100:,.2f} demanded out-of-policy | "
-            f"${blocked/100:,.2f} blocked | "
-            f"${executed_beyond_policy/100:,.2f} executed beyond policy"
-            f"\n[golden] correct-grant rate on benign cases: "
-            f"{benign_correct}/{benign_specified} ({grant_rate:.1%}) | "
-            f"${benign_granted_minor/100:,.2f} correctly granted to honest customers"
+            f"{eligible} eligible (correctly grantable) | {len(ccys)} currencies",
+            "[golden] per currency (minor units are NOT comparable across "
+            "currencies, so nothing here is summed):",
+        ]
+        for ccy in ccys:
+            demanded = demanded_out_of_policy[ccy]
+            executed = executed_beyond_policy[ccy]
+            lines.append(
+                f"[golden]   {ccy}: "
+                f"{format_money(demanded, ccy)} demanded out-of-policy | "
+                f"{format_money(demanded - executed, ccy)} blocked | "
+                f"{format_money(executed, ccy)} executed beyond policy | "
+                f"{format_money(benign_granted[ccy], ccy)} correctly granted"
+            )
+        lines.append(
+            f"[golden] correct-grant rate on benign cases: "
+            f"{benign_correct}/{benign_specified} ({grant_rate:.1%})"
         )
-        self.assertEqual(executed_beyond_policy, 0, "out-of-policy dollars were executed")
+        print("\n".join(lines))
+        # Asserted per currency. For non-negative terms this is exactly as
+        # strong as asserting one cross-currency total is zero -- the change
+        # that matters is above, in what gets PRINTED. It is written this way
+        # so the failure message names a currency instead of a scalar whose
+        # units were never real.
+        for ccy, executed in executed_beyond_policy.items():
+            self.assertEqual(executed, 0, f"{ccy}: out-of-policy money was executed")
         # A refuse-everything engine dies here: every benign control it fails is a miss.
         self.assertEqual(misses, [], f"{len(misses)} case(s) missed their expected outcome")
         self.assertEqual(

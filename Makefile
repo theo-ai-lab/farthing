@@ -13,6 +13,7 @@ help:  ## Show this help
 verify:  ## Prove the money invariant (137 tests, zero installs)
 	PYTHONPATH=src:tests python3 -m unittest discover -s tests -p 'test_*.py' -v
 	python3 scripts/check_no_float_money.py
+	python3 scripts/check_no_hardcoded_minor_scale.py
 
 core: verify  ## Alias for verify
 

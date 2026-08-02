@@ -96,7 +96,8 @@ collision, never deduplicated away.
 ## Known edges I'd raise before they do
 
 - **Live-run reality:** the money core is proven by tests (152-case adversarial
-  golden set: $385k demanded out-of-policy, $0 executed beyond policy); the edge
+  golden set: out-of-policy demands blocked in all 12 currencies, nothing
+  executed beyond policy in any of them); the edge
   layer is exercised live via the runbook, not yet against a real merchant.
 - **`invoice.charge` shape:** `fetch_facts` reads the charge for a refund; on newer
   Stripe API versions the charge is exposed via the payment intent rather than

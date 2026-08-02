@@ -1,10 +1,11 @@
 # Farthing
 
-**The support agent that is allowed to touch money.** Refunds, cancellations, and
-plan changes resolved end-to-end against Stripe — where a deterministic policy
-engine decides every dollar amount, a human one-click-approves a fully-previewed
-action, execution is exactly-once, and every cent lands in a hash-chained audit
-ledger.
+**The support agent that is allowed to touch money.** Refunds resolved end-to-end
+against Stripe — where a deterministic policy engine decides every dollar amount,
+a human one-click-approves a fully-previewed action, execution is exactly-once,
+and every cent lands in a hash-chained audit ledger. Cancellations and plan
+changes run through the same engine, which decides eligibility and routes them;
+neither moves money today, and neither reaches the Stripe execution path.
 
 Most "AI support agent" demos draft a reply. Farthing does the part everyone else
 is afraid to automate: it *acts* on the billing system. The interesting
@@ -25,13 +26,26 @@ The money-safety invariant is provable in about a second, with **zero installs**
 git clone https://github.com/theo-ai-lab/farthing.git && cd farthing
 make verify          # 137 tests incl. the 152-case adversarial gate and the
                      # kill-at-every-boundary crash matrix, pure stdlib
+                     # (8 skip without the optional Temporal CLI; 129 execute)
 ```
 
-You'll see the gate block \$385,021.39 of out-of-policy refund demands with \$0
-executed beyond policy — and, from the same run, a **100% correct-grant rate on
-the 37 benign controls**: the honest customers get the exact amount they are
-owed. `make help` lists everything else; the full stack (live Stripe/Temporal)
-is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+You'll see every out-of-policy refund demand blocked, with **nothing executed
+beyond policy in any currency** — and, from the same run, a **100% correct-grant
+rate on the 37 benign controls**: the honest customers get the exact amount they
+are owed.
+
+The gate reports money **per currency and never as one total**. The set spans 12
+currencies with three different minor-unit exponents — JPY, KRW and VND are
+zero-decimal, BHD and KWD are three-decimal — so a cross-currency sum is a
+quantity with no unit, and dividing it by 100 would render 25,000,000 VND (about
+950 US dollars) as "\$250,000.00". Adding those integers together is the exact
+mistake [`money.format_money`](src/farthing/money.py) exists to prevent, and
+`scripts/check_no_hardcoded_minor_scale.py` fails the build if any reporter
+reintroduces it. In USD, the set demands and blocks \$27,654.39; the other
+eleven currencies are reported on their own lines.
+
+`make help` lists everything else; the full stack (live Stripe/Temporal) is in
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
 ---
 
@@ -72,14 +86,16 @@ even against a fully prompt-injected model:
 
 Try to socially-engineer an over-refund and watch the policy engine block it,
 explain why, and route it to a human. On the 152-case adversarial golden set,
-every out-of-policy dollar demanded is blocked and **\$0 executes beyond policy**
-— enforced as a CI gate that fails the build on a single violation.
+every out-of-policy demand is blocked and **nothing executes beyond policy in any
+of the 12 currencies** — enforced as a CI gate that fails the build on a single
+violation, asserted per currency so the failure names one.
 
 Blocking is the easy half, and a gate that only measured blocking would be
 passed by an engine that refused everyone. So the same gate is two-sided: each
 case declares the outcome it was written to produce, and the 37 benign controls
-are graded on **correct grants, currently 37/37** — right disposition, right
-amount, to the cent. Refuse a single honest customer and the build fails.
+are graded on **correct grants, currently 37/37** — the right disposition on all
+37, and the exact amount to the cent on the 32 that declare one. Refuse a single
+honest customer and the build fails.
 
 ## Architecture at a glance
 
