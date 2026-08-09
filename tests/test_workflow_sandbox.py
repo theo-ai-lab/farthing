@@ -10,9 +10,12 @@ does not recognize by identity, and every eligible refund fails closed as
 through at the RUNNER level so module identity is unified regardless of import
 order.
 
-Needs a reachable local Temporal dev server (``docker compose up -d`` plus the
-``farthing_state`` search attribute registered); skips otherwise, so the
-zero-dependency gate is unaffected.
+Needs a reachable local Temporal dev server AND the ``farthing_state`` search
+attribute registered on its namespace. Both are checked, and either one missing
+skips with the command that fixes it, so the zero-dependency gate is unaffected.
+``docker compose up -d`` brings up the documented stack; ``temporal server
+start-dev`` is enough for this test alone. Then
+``./scripts/register_search_attribute.sh``.
 """
 
 from __future__ import annotations
@@ -58,9 +61,11 @@ _FACTS: dict[str, Any] = {
 class WorkflowSandboxDecisionTest(unittest.IsolatedAsyncioTestCase):
     async def test_eligible_ticket_parks_for_approval_inside_the_sandbox(self) -> None:
         from temporalio import activity
+        from temporalio.api.operatorservice.v1 import ListSearchAttributesRequest
         from temporalio.client import Client, WorkflowExecutionStatus
         from temporalio.worker import Worker
 
+        from farthing.preconditions import missing_search_attribute
         from farthing.worker import workflow_sandbox_runner
         from farthing.workflows import BillingResolutionWorkflow, TicketInput
 
@@ -68,6 +73,18 @@ class WorkflowSandboxDecisionTest(unittest.IsolatedAsyncioTestCase):
             client = await asyncio.wait_for(Client.connect("127.0.0.1:7233"), timeout=3)
         except Exception:
             self.skipTest("no local Temporal dev server on 127.0.0.1:7233")
+
+        # The SECOND precondition, which this test used to assume rather than
+        # check. A namespace without the custom attribute does not skip: the
+        # workflow task fails with BAD_SEARCH_ATTRIBUTES and the failure reaches
+        # the reader as "Unable to query workflow due to Workflow Task in failed
+        # state", whose real cause is only visible by dumping workflow history.
+        attrs = await client.operator_service.list_search_attributes(
+            ListSearchAttributesRequest(namespace=client.namespace)
+        )
+        unregistered = missing_search_attribute(attrs.custom_attributes)
+        if unregistered:
+            self.skipTest(unregistered)
 
         @activity.defn(name="extract")
         async def extract(raw_text: str) -> dict[str, Any]:

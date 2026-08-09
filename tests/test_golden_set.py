@@ -6,19 +6,28 @@ safety invariant on every single one:
 
 * the request text never changes the amount (text-invariance),
 * the amount never exceeds the facts-derived policy ceiling,
-* incoherent facts never pay out, and
-* no attack ever extracts more than the ceiling.
+* incoherent facts never pay out,
+* no attack ever extracts more than the ceiling, and
+* no non-ELIGIBLE disposition ever carries money.
 
-It then prints the headline the README quotes: how many attacks, how many dollars
-were demanded out-of-policy, and how many of those dollars were blocked (all of
-them, or the build fails). This is the gate that blocks any deploy on an
-out-of-policy execution.
+Those are all *upper* bounds, and upper bounds alone are not a gate: an engine
+that refused every request and paid nothing would satisfy every one of them. So
+the set is two-sided. Cases carry ``expected_disposition`` and/or
+``expected_amount_minor`` — the outcome the case was written to produce — and the
+gate asserts the engine hits them exactly. A refuse-everything engine fails here
+on the first benign control.
+
+It then prints the two headlines the README quotes: the out-of-policy dollars
+demanded and blocked (all of them, or the build fails), and the correct-grant
+rate over the benign cases — how often the engine pays the honest customer the
+right amount. Both numbers come out of this one gate.
 """
 
 from __future__ import annotations
 
 import json
 import unittest
+from collections import defaultdict
 from decimal import Decimal
 from pathlib import Path
 
@@ -29,7 +38,7 @@ from farthing.domain import (
     ExtractedRequest,
     SubscriptionStatus,
 )
-from farthing.money import Money, pct_of
+from farthing.money import Money, format_money, pct_of
 from farthing.policy import decide
 
 DAY = 86_400
@@ -68,6 +77,17 @@ def _ceiling(f: AccountFacts) -> int:
     return remaining.min(cap_remaining).minor_units
 
 
+def _expected(c: dict) -> tuple[Disposition | None, int | None]:
+    """The outcome this case was written to produce, or ``None`` where the case's
+    intended verdict is genuinely ambiguous and only the ceiling is asserted."""
+    disposition = c.get("expected_disposition")
+    amount = c.get("expected_amount_minor")
+    return (
+        Disposition(disposition) if disposition is not None else None,
+        int(amount) if amount is not None else None,
+    )
+
+
 class TestAdversarialGoldenSet(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -76,9 +96,22 @@ class TestAdversarialGoldenSet(unittest.TestCase):
 
     def test_every_case_is_safe(self) -> None:
         attacks = 0
-        demanded_out_of_policy = 0
-        executed_beyond_policy = 0
+        # Per-currency, never a single scalar. The set spans 12 currencies with
+        # three different minor-unit exponents (JPY/KRW/VND are zero-decimal,
+        # BHD/KWD are three-decimal), so adding their minor units into one
+        # accumulator and dividing by 100 produces a number with no unit --
+        # 25,000,000 VND would read as "$250,000.00". money.format_money exists
+        # precisely to stop that, and this reporter must use it too.
+        demanded_out_of_policy: dict[str, int] = defaultdict(int)
+        executed_beyond_policy: dict[str, int] = defaultdict(int)
+        benign_granted: dict[str, int] = defaultdict(int)
         eligible = 0
+        # Two-sided accounting: the misses are collected rather than asserted
+        # case-by-case so the printed rate is a real measurement of the whole
+        # set, not a number that only exists when everything already passed.
+        misses: list[str] = []
+        benign_specified = 0
+        benign_correct = 0
 
         for c in self.cases:
             facts = _facts(c["facts"])
@@ -103,33 +136,102 @@ class TestAdversarialGoldenSet(unittest.TestCase):
             if not facts.facts_are_coherent():
                 self.assertEqual(d.amount_minor, 0, f"{cid}: paid out on incoherent facts")
                 self.assertIs(d.disposition, Disposition.ESCALATE, f"{cid}: bad facts not escalated")
+            # 4. only ELIGIBLE moves money — DENY and ESCALATE offer zero, always
+            if d.disposition is not Disposition.ELIGIBLE:
+                self.assertEqual(d.amount_minor, 0, f"{cid}: money on a non-ELIGIBLE disposition")
 
             if d.disposition is Disposition.ELIGIBLE:
                 eligible += 1
+
+            # The other direction: the engine must hit the outcome the case was
+            # written to produce, not merely stay under a ceiling.
+            exp_disposition, exp_amount = _expected(c)
+            hit = True
+            if exp_disposition is not None and d.disposition is not exp_disposition:
+                hit = False
+                misses.append(
+                    f"{cid}: expected {exp_disposition.value}, engine returned {d.disposition.value}"
+                )
+            if exp_amount is not None and d.amount_minor != exp_amount:
+                hit = False
+                misses.append(
+                    f"{cid}: expected amount {exp_amount}, engine returned {d.amount_minor}"
+                )
+
+            if not c.get("is_attack") and (exp_disposition is not None or exp_amount is not None):
+                benign_specified += 1
+                if hit:
+                    benign_correct += 1
+                    benign_granted[d.currency] += d.amount_minor
 
             if c.get("is_attack") and int(c.get("attacker_demanded_minor", 0)) > 0:
                 attacks += 1
                 demand = int(c["attacker_demanded_minor"])
                 ceiling = _ceiling(facts)
-                # 4. attacker never extracts more than the ceiling
+                # 5. attacker never extracts more than the ceiling
                 self.assertLessEqual(d.amount_minor, ceiling, f"{cid}: attack beat ceiling")
                 if demand > ceiling:
-                    demanded_out_of_policy += demand - ceiling
-                    executed_beyond_policy += max(d.amount_minor - ceiling, 0)
+                    ccy = facts.currency
+                    demanded_out_of_policy[ccy] += demand - ceiling
+                    executed_beyond_policy[ccy] += max(d.amount_minor - ceiling, 0)
                     self.assertLess(d.amount_minor, demand, f"{cid}: honored an over-refund demand")
-
-        blocked = demanded_out_of_policy - executed_beyond_policy
-        print(
+        grant_rate = benign_correct / benign_specified if benign_specified else 0.0
+        ccys = sorted(set(demanded_out_of_policy) | set(benign_granted))
+        lines = [
             f"\n[golden] {len(self.cases)} cases | {attacks} attacks | "
-            f"{eligible} eligible (correctly grantable) | "
-            f"${demanded_out_of_policy/100:,.2f} demanded out-of-policy | "
-            f"${blocked/100:,.2f} blocked | "
-            f"${executed_beyond_policy/100:,.2f} executed beyond policy"
+            f"{eligible} eligible (correctly grantable) | {len(ccys)} currencies",
+            "[golden] per currency (minor units are NOT comparable across "
+            "currencies, so nothing here is summed):",
+        ]
+        for ccy in ccys:
+            demanded = demanded_out_of_policy[ccy]
+            executed = executed_beyond_policy[ccy]
+            lines.append(
+                f"[golden]   {ccy}: "
+                f"{format_money(demanded, ccy)} demanded out-of-policy | "
+                f"{format_money(demanded - executed, ccy)} blocked | "
+                f"{format_money(executed, ccy)} executed beyond policy | "
+                f"{format_money(benign_granted[ccy], ccy)} correctly granted"
+            )
+        lines.append(
+            f"[golden] correct-grant rate on benign cases: "
+            f"{benign_correct}/{benign_specified} ({grant_rate:.1%})"
         )
-        self.assertEqual(executed_beyond_policy, 0, "out-of-policy dollars were executed")
+        print("\n".join(lines))
+        # Asserted per currency. For non-negative terms this is exactly as
+        # strong as asserting one cross-currency total is zero -- the change
+        # that matters is above, in what gets PRINTED. It is written this way
+        # so the failure message names a currency instead of a scalar whose
+        # units were never real.
+        for ccy, executed in executed_beyond_policy.items():
+            self.assertEqual(executed, 0, f"{ccy}: out-of-policy money was executed")
+        # A refuse-everything engine dies here: every benign control it fails is a miss.
+        self.assertEqual(misses, [], f"{len(misses)} case(s) missed their expected outcome")
+        self.assertEqual(
+            benign_correct, benign_specified,
+            f"correct-grant rate is {grant_rate:.1%}, not 100%",
+        )
 
     def test_has_enough_cases(self) -> None:
         self.assertGreaterEqual(len(self.cases), 120, "golden set is too small to be a credible gate")
+
+    def test_every_benign_case_declares_its_expected_outcome(self) -> None:
+        """Ceilings alone are unfalsifiable. Every benign control states what the
+        engine owes the customer, so refusing them all fails the build."""
+        undeclared = [
+            c["id"] for c in self.cases
+            if not c.get("is_attack") and _expected(c) == (None, None)
+        ]
+        self.assertEqual(undeclared, [], "benign cases with no expected outcome")
+
+    def test_enough_cases_expect_a_positive_payout(self) -> None:
+        """The gate must be anchored by real money owed, not only by zeros — the
+        one thing a refuse-everything engine can never satisfy."""
+        payouts = [
+            c["id"] for c in self.cases
+            if int(c.get("expected_amount_minor") or 0) > 0
+        ]
+        self.assertGreaterEqual(len(payouts), 30, "too few positive-payout expectations to anchor the gate")
 
 
 if __name__ == "__main__":

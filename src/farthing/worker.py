@@ -50,6 +50,7 @@ def workflow_sandbox_runner() -> SandboxedWorkflowRunner:
             "farthing.ledger",
             "farthing.money",
             "farthing.policy",
+            "farthing.reply_guard",
         )
     )
 

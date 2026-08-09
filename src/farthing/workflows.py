@@ -25,10 +25,14 @@ with workflow.unsafe.imports_passed_through():
     from .activities import facts_from_dict, request_from_dict
     from .domain import Disposition, PreparedAction
     from .policy import decide
+    from .preconditions import REQUIRED_SEARCH_ATTRIBUTE
+    from .reply_guard import DecidedOutcome, Outcome, fallback_reply
 
 # Custom search attribute the approval inbox filters on to list parked workflows.
-# Register it once per Temporal namespace (see docs/RUNBOOK.md).
-FARTHING_STATE = SearchAttributeKey.for_keyword("farthing_state")
+# Register it once per Temporal namespace (see docs/RUNBOOK.md). The name comes
+# from farthing.preconditions so the attribute this upserts and the one the
+# registration script creates cannot drift apart into a silent empty inbox.
+FARTHING_STATE = SearchAttributeKey.for_keyword(REQUIRED_SEARCH_ATTRIBUTE)
 
 
 @dataclass
@@ -73,20 +77,26 @@ class BillingResolutionWorkflow:
     def pending(self) -> bool:
         return self._approval is None and not self._denied
 
-    async def _reply(self, disposition: str, amount_minor: int, currency: str,
-                     raw_text: str) -> str:
+    async def _reply(self, outcome: DecidedOutcome, raw_text: str) -> str:
         """Draft the customer reply with a BOUNDED retry and a templated fallback.
         This step is cosmetic and runs after the refund and ledger commit — it must
         never be able to wedge (via Temporal's default unlimited retries) a workflow
-        whose money step already succeeded."""
+        whose money step already succeeded.
+
+        ``outcome`` is a :class:`~farthing.reply_guard.DecidedOutcome`, not a
+        disposition string, so a new branch of this workflow cannot hand the reply
+        guard a verdict the guard has never heard of — the failure that left the
+        successful-refund path unpoliced. The activity rebuilds the same type from
+        the JSON payload and refuses anything outside the vocabulary."""
         try:
             return await workflow.execute_activity(
-                "draft_reply", args=[disposition, amount_minor, currency, raw_text],
+                "draft_reply",
+                args=[outcome.kind.value, outcome.amount_minor, outcome.currency, raw_text],
                 start_to_close_timeout=timedelta(seconds=60),
                 retry_policy=RetryPolicy(maximum_attempts=4),
             )
         except ActivityError:
-            return f"Your billing request has been processed (status: {disposition})."
+            return fallback_reply(outcome.kind)
 
     @workflow.query
     def prepared_action(self) -> dict[str, Any] | None:
@@ -118,8 +128,9 @@ class BillingResolutionWorkflow:
         # Non-eligible dispositions never reach an approval gate or a refund.
         if decision.disposition is not Disposition.ELIGIBLE or decision.amount_minor == 0:
             reply = await self._reply(
-                decision.disposition.value, decision.amount_minor,
-                decision.currency, req.raw_text,
+                DecidedOutcome(Outcome.for_disposition(decision.disposition),
+                               decision.amount_minor, decision.currency),
+                req.raw_text,
             )
             return TicketResult(
                 disposition=decision.disposition.value, amount_minor=decision.amount_minor,
@@ -151,8 +162,10 @@ class BillingResolutionWorkflow:
             workflow.upsert_search_attributes(  # pyright: ignore[reportUnknownMemberType]  # temporalio stub gap
                 [FARTHING_STATE.value_set("denied")]
             )
-            reply = await self._reply("denied_by_reviewer", 0, decision.currency, req.raw_text)
-            return TicketResult("denied_by_reviewer", 0, decision.currency, None, reply)
+            reply = await self._reply(
+                DecidedOutcome(Outcome.DENIED_BY_REVIEWER, 0, decision.currency), req.raw_text
+            )
+            return TicketResult(Outcome.DENIED_BY_REVIEWER.value, 0, decision.currency, None, reply)
         workflow.upsert_search_attributes(  # pyright: ignore[reportUnknownMemberType]  # temporalio stub gap
             [FARTHING_STATE.value_set("approved")]
         )
@@ -185,15 +198,20 @@ class BillingResolutionWorkflow:
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=RetryPolicy(maximum_attempts=5),
             )
-            reply = await self._reply("execution_failed", 0, decision.currency, req.raw_text)
+            reply = await self._reply(
+                DecidedOutcome(Outcome.EXECUTION_FAILED, 0, decision.currency), req.raw_text
+            )
             return TicketResult("dead_lettered", 0, decision.currency, None, reply)
 
         workflow.upsert_search_attributes(  # pyright: ignore[reportUnknownMemberType]  # temporalio stub gap
             [FARTHING_STATE.value_set("refunded")]
         )
-        reply = await self._reply("refunded", decision.amount_minor, decision.currency, req.raw_text)
+        reply = await self._reply(
+            DecidedOutcome(Outcome.REFUNDED, decision.amount_minor, decision.currency),
+            req.raw_text,
+        )
         return TicketResult(
-            disposition="refunded", amount_minor=decision.amount_minor,
+            disposition=Outcome.REFUNDED.value, amount_minor=decision.amount_minor,
             currency=decision.currency, executed_refund_id=refund.get("id"), reply=reply,
         )
 

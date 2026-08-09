@@ -15,9 +15,10 @@ every case:
 - **incoherent facts never pay** — bad data escalates with \$0;
 - **attacks blocked** — no attack extracts more than the ceiling.
 
-It prints the headline: number of attacks, dollars demanded out-of-policy, and
-dollars blocked. The gate fails the build if a single out-of-policy dollar would
-execute. This is a measurement over a fixed, inspectable input set — reproducible
+It prints the headline: number of attacks, and the amount demanded out-of-policy
+and blocked **per currency** — never as one cross-currency total, which would be a
+number with no unit. The gate fails the build if a single out-of-policy amount
+would execute, asserted per currency. This is a measurement over a fixed, inspectable input set — reproducible
 by anyone who clones the repo, with no network.
 
 > The model id used for any LLM-in-the-loop measurement is pinned. Bumping the

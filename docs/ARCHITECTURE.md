@@ -48,11 +48,16 @@ in different processes.
    workflow state (server-side truth, never the client), issues an HMAC
    `ApprovalToken` **bound to the exact amount**, and signals the workflow.
 8. **Execute (exactly-once).** The workflow schedules `execute_refund` **on the
-   execute task queue**. That activity re-verifies the token against the decision
-   and the prepared action (`authorize_execution`), then calls Stripe with the
-   deterministic idempotency key. Stripe collapses any retry of the same key into
-   the original refund; a refused authorization is a **non-retryable** error, so a
-   blocked execution can never be retried into success.
+   execute task queue**. That activity is wiring: it builds the real settings,
+   database connection and Stripe client and hands them to `settlement.settle_refund`,
+   which owns the ordering. `settle_refund` re-verifies the token against the
+   decision and the prepared action (`authorize_execution`), commits the durable
+   reservation and the audit row **together, before Stripe**, and only then calls
+   Stripe with the deterministic idempotency key. Stripe collapses any retry of the
+   same key into the original refund, and the key is persisted into refund metadata
+   so recovery still resolves it after Stripe's window closes. A refused
+   authorization is a **non-retryable** error, so a blocked execution can never be
+   retried into success.
 9. **Record.** Every executed refund appends a hash-chained `LedgerEntry` tying
    the amount to the ticket, the approver, the OTel trace id, and the policy
    version.
@@ -74,7 +79,14 @@ in different processes.
   which surfaces any executed-but-unsettled or off-ledger refund as an incident.
 - **Deterministic idempotency key (workflow id + step + ticket)** — a retried
   activity re-uses the key rather than minting a fresh one, which is what makes
-  execution exactly-once across crashes and redeliveries.
+  execution exactly-once across crashes and redeliveries. The key is scoped to the
+  **ticket**, deliberately: that is what bounds a ticket to one refund forever. The
+  cost is that it does not identify the *action*, so a re-driven ticket can reach
+  the replay path holding a different charge or amount against the same
+  reservation. `settle_refund` closes that by checking the reservation's committed
+  audit row before treating it as this action's own, and refusing when they
+  disagree (`replay_action_drift`) — a dead-lettered ticket a human resolves,
+  rather than a silent under-refund or a second charge.
 - **HMAC approval token bound to the amount** — the approved figure and the
   executed figure cannot diverge; tampering invalidates the signature.
 - **Hash-chained ledger** — tamper-evidence an auditor can verify independently
@@ -92,3 +104,22 @@ in different processes.
 | Money moved off-ledger | Nightly reconciliation flags unmatched Stripe refund as incident |
 | Ledger tampered | `verify_chain` fails from the tampered entry onward |
 | Worker/deploy during approval wait | Durable workflow resumes; wait survives |
+| Process dies at any boundary in `settle_refund` | Recovery re-runs the activity; the reservation + audit row either both survived or both rolled back, so at most one refund exists. Enumerated and asserted in `tests/test_crash_matrix.py` |
+| Process dies with the refund in flight at Stripe | The key is in refund metadata, so recovery resolves the existing refund instead of creating a second one — with Stripe's own idempotency window open **or** closed |
+| A reserved key is replayed for a different action | Refused (`replay_action_drift`). The key is derived per ticket, so a re-driven ticket can arrive at the replay path with a different charge or amount; the committed audit row is checked before the reservation is treated as this action's own |
+| A reserved key has no audit row | Refused (`replay_without_record`). The commit ordering makes this unreachable, so reaching it means the ordering is broken and paying would be worse than failing |
+
+### What the crash matrix does and does not prove
+
+`tests/test_crash_matrix.py` kills the process at every durability boundary in
+`settle_refund`, on the first attempt and again during recovery, with the
+provider's idempotency window both open and closed, and asserts after **every**
+attempt that at most one refund exists, the chain verifies, no money moved beyond
+the approved amount, and — the one that matters — money never moved without a
+committed audit row. The boundaries are read from `settlement.KILL_POINTS`, which
+is cross-checked against the source with `ast`, so the enumeration cannot silently
+fall behind the code.
+
+It is offline and deterministic. It proves the *logic* survives death at every
+boundary. It does **not** prove a deployment does: killing the container mid-refund
+against real Stripe is a separate exercise and has not been run.
