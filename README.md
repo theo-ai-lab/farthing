@@ -163,7 +163,7 @@ Anthropic key) to run live — see [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
 ## Status & honesty
 
-This is a portfolio build. The safety and reliability core is real, tested, and
+The safety and reliability core is real, tested, and
 CI-gated. The before/after numbers are measured on the adversarial golden set and
 a Stripe **test-mode** demo tenant — the methodology is in
 [`docs/MEASUREMENT.md`](docs/MEASUREMENT.md), and every figure is framed as
